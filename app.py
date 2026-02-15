@@ -279,14 +279,20 @@ if st.session_state.final_df is not None:
     edited_df = st.data_editor(
         st.session_state.final_df,
         use_container_width=True,
-        key="po_editor"
+        key="po_editor",
+        num_rows="dynamic"
     )
 
-    # FIXED: amount auto-update logic
-    edited_df["AMOUNT"] = edited_df["QUANTITY"] * edited_df["PRICE"]
+    # calculate amount freshly every run
+    recalculated_amount = edited_df["QUANTITY"] * edited_df["PRICE"]
 
-    st.session_state.final_df = edited_df
+    # overwrite amount column safely
+    edited_df.loc[:, "AMOUNT"] = recalculated_amount
 
+    # IMPORTANT: update session state AFTER recalculation
+    st.session_state.final_df = edited_df.copy()
+
+    # totals calculation
     subtotal = edited_df["AMOUNT"].sum()
 
     discount = subtotal * discount_rate
@@ -309,6 +315,7 @@ if st.session_state.final_df is not None:
         </div>
         """, unsafe_allow_html=True)
 
+    # export
     buffer = io.BytesIO()
 
     export_df = edited_df.copy()
