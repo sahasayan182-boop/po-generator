@@ -10,10 +10,19 @@ from rapidfuzz import fuzz
 st.set_page_config(page_title="Purchase Order Generator", layout="wide")
 st.title("Purchase Order Generator")
 
-PRIORITY_WH = ["BHIWANDI", "FARIDABAD", "CHENNAI", "KOLKATA"]
+# =====================================================
+# PRIMARY WAREHOUSES
+# =====================================================
+
+PRIMARY_WAREHOUSES = [
+    "BWD_MAIN",
+    "FBD_MAIN",
+    "CHN_CENTRL",
+    "KOL_MAIN"
+]
 
 # =====================================================
-# SESSION STATE INIT (SAFE)
+# SESSION STATE INIT
 # =====================================================
 
 if "po_items" not in st.session_state:
@@ -47,7 +56,7 @@ gst_option = col4.selectbox("GST", ["0%", "5%", "12%", "18%", "28%"], index=3)
 gst_rate = float(gst_option.replace("%",""))/100
 
 # =====================================================
-# LOAD SALES REGISTER (OPTIMIZED FOR LARGE DATA)
+# LOAD SALES
 # =====================================================
 
 @st.cache_data
@@ -55,7 +64,6 @@ def load_sales(file):
 
     df = pd.read_excel(file, sheet_name="data")
 
-    # normalize columns
     df.columns = df.columns.str.strip().str.upper()
 
     df["INVOICE DATE"] = pd.to_datetime(df["INVOICE DATE"])
@@ -68,7 +76,6 @@ def load_sales(file):
 
     df["RATE"] = df["RATE"].astype(float)
 
-    # MASTER SEARCH TEXT
     df["SEARCH_TEXT"] = (
         df["ITEM CODE"] + " " +
         df["OEM"] + " " +
@@ -79,7 +86,6 @@ def load_sales(file):
 
     df = df.sort_values("INVOICE DATE", ascending=False)
 
-    # unique products by item code
     unique_df = df.drop_duplicates(subset=["ITEM CODE"])
 
     return df, unique_df
@@ -112,7 +118,7 @@ stock_lookup = stock_df.groupby("ITEM CODE")["STOCK"].sum().to_dict()
 wh_lookup = stock_df.groupby("ITEM CODE")["WH CODE"].apply(list).to_dict()
 
 # =====================================================
-# HIGH-ACCURACY SEARCH ENGINE (FIXED)
+# SEARCH ENGINE
 # =====================================================
 
 def find_candidates(query):
@@ -127,10 +133,8 @@ def find_candidates(query):
 
         text = row["SEARCH_TEXT"]
 
-        # token match score
         token_score = sum(1 for token in query_tokens if token in text)
 
-        # fuzzy backup score
         fuzzy_score = fuzz.partial_ratio(query, text)
 
         total_score = token_score * 100 + fuzzy_score
@@ -151,7 +155,7 @@ def find_candidates(query):
     return [x[1] for x in scored[:30]]
 
 # =====================================================
-# PRICE FETCH (LATEST)
+# GET PRICE
 # =====================================================
 
 def get_latest_price(item_code):
@@ -193,7 +197,7 @@ if st.button("Generate Purchase Order"):
         })
 
 # =====================================================
-# PRODUCT + WAREHOUSE CONFIRMATION
+# PRODUCT CONFIRMATION
 # =====================================================
 
 if st.session_state.po_items:
@@ -211,18 +215,11 @@ if st.session_state.po_items:
 
         options.append("Enter manually...")
 
-        selected = st.selectbox(
-            "Product",
-            options,
-            key=f"prod_{idx}"
-        )
+        selected = st.selectbox("Product", options, key=f"prod_{idx}")
 
         if selected == "Enter manually...":
 
-            manual_code = st.text_input(
-                "Enter Item Code manually",
-                key=f"manual_{idx}"
-            ).upper()
+            manual_code = st.text_input("Enter Item Code manually", key=f"manual_{idx}").upper()
 
             if manual_code == "":
                 continue
@@ -240,26 +237,32 @@ if st.session_state.po_items:
 
         row = sales_df[sales_df["ITEM CODE"] == selected_code].iloc[0]
 
-        wh_list = wh_lookup.get(selected_code, [""])
+        wh_list = list(set(wh_lookup.get(selected_code, [])))
 
         wh_sorted = sorted(
             wh_list,
-            key=lambda x: PRIORITY_WH.index(x) if x in PRIORITY_WH else 999
+            key=lambda x: (
+                0 if x in PRIMARY_WAREHOUSES else 1,
+                PRIMARY_WAREHOUSES.index(x) if x in PRIMARY_WAREHOUSES else 999,
+                x
+            )
         )
 
-        if len(wh_sorted) == 1:
+        default_index = 0
+        for i, wh in enumerate(wh_sorted):
+            if wh in PRIMARY_WAREHOUSES:
+                default_index = i
+                break
 
-            selected_wh = wh_sorted[0]
+        selected_wh = st.selectbox(
+            "Warehouse",
+            wh_sorted,
+            index=default_index,
+            key=f"wh_{idx}"
+        )
 
-            st.info(f"WH auto-selected: {selected_wh}")
-
-        else:
-
-            selected_wh = st.selectbox(
-                "Warehouse",
-                wh_sorted,
-                key=f"wh_{idx}"
-            )
+        if not any(wh in PRIMARY_WAREHOUSES for wh in wh_list):
+            st.warning("⚠ Not available in primary warehouses")
 
         final_rows.append({
 
@@ -282,7 +285,7 @@ if st.session_state.po_items:
         st.session_state.final_df = df
 
 # =====================================================
-# DISPLAY EDITABLE PO TABLE (PERSISTENT)
+# DISPLAY EDITABLE TABLE
 # =====================================================
 
 if st.session_state.final_df is not None:
@@ -290,14 +293,15 @@ if st.session_state.final_df is not None:
     edited_df = st.data_editor(
         st.session_state.final_df,
         use_container_width=True,
-        key="po_editor"
+        key="po_editor",
+        column_config={
+            "AMOUNT": st.column_config.NumberColumn(disabled=True)
+        }
     )
 
-    # live amount update
     edited_df["AMOUNT"] = edited_df["QUANTITY"] * edited_df["PRICE"]
 
-    # save changes
-    st.session_state.final_df = edited_df
+    st.session_state.final_df = edited_df.copy()
 
     subtotal = edited_df["AMOUNT"].sum()
 
@@ -314,8 +318,8 @@ if st.session_state.final_df is not None:
         st.markdown(f"""
         <div style="text-align:right;font-size:16px">
         Subtotal: ₹{subtotal:,.2f}<br>
-        Discount: ₹{discount:,.2f}<br>
-        GST: ₹{gst:,.2f}<br>
+        Discount ({discount_option}): ₹{discount:,.2f}<br>
+        GST ({gst_option}): ₹{gst:,.2f}<br>
         <hr>
         <b style="font-size:24px">Total: ₹{total:,.2f}</b>
         </div>
@@ -323,10 +327,15 @@ if st.session_state.final_df is not None:
 
     buffer = io.BytesIO()
 
-    edited_df.to_excel(buffer, index=False)
+    export_df = edited_df.copy()
 
-    st.download_button(
-        "Download Purchase Order Excel",
-        buffer.getvalue(),
-        "PO.xlsx"
-    )
+    totals_df = pd.DataFrame({
+        "PRICE": ["Subtotal", f"Discount ({discount_option})", f"GST ({gst_option})", "TOTAL"],
+        "AMOUNT": [subtotal, discount, gst, total]
+    })
+
+    final_export = pd.concat([export_df, totals_df])
+
+    final_export.to_excel(buffer, index=False)
+
+    st.download_button("Download Purchase Order Excel", buffer.getvalue(), "PO.xlsx")
