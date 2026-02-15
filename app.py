@@ -11,7 +11,7 @@ st.set_page_config(page_title="Purchase Order Generator", layout="wide")
 st.title("Purchase Order Generator")
 
 # =====================================================
-# PRIMARY WAREHOUSES
+# PRIMARY WAREHOUSE PRIORITY
 # =====================================================
 
 PRIMARY_WAREHOUSES = [
@@ -56,7 +56,7 @@ gst_option = col4.selectbox("GST", ["0%", "5%", "12%", "18%", "28%"], index=3)
 gst_rate = float(gst_option.replace("%",""))/100
 
 # =====================================================
-# LOAD SALES
+# LOAD SALES DATA
 # =====================================================
 
 @st.cache_data
@@ -93,7 +93,7 @@ def load_sales(file):
 sales_df, unique_products = load_sales(sales_file)
 
 # =====================================================
-# LOAD STOCK
+# LOAD STOCK DATA
 # =====================================================
 
 @st.cache_data
@@ -118,7 +118,7 @@ stock_lookup = stock_df.groupby("ITEM CODE")["STOCK"].sum().to_dict()
 wh_lookup = stock_df.groupby("ITEM CODE")["WH CODE"].apply(list).to_dict()
 
 # =====================================================
-# SEARCH ENGINE
+# SEARCH FUNCTION
 # =====================================================
 
 def find_candidates(query):
@@ -155,7 +155,7 @@ def find_candidates(query):
     return [x[1] for x in scored[:30]]
 
 # =====================================================
-# GET PRICE
+# PRICE FUNCTION
 # =====================================================
 
 def get_latest_price(item_code):
@@ -230,38 +230,24 @@ if st.session_state.po_items:
 
             selected_code = selected.split("|")[0].strip()
 
-        if selected_code not in sales_df["ITEM CODE"].values:
-
-            st.warning("Invalid Item Code")
-            continue
-
         row = sales_df[sales_df["ITEM CODE"] == selected_code].iloc[0]
 
         wh_list = list(set(wh_lookup.get(selected_code, [])))
 
-        wh_sorted = sorted(
-            wh_list,
-            key=lambda x: (
-                0 if x in PRIMARY_WAREHOUSES else 1,
-                PRIMARY_WAREHOUSES.index(x) if x in PRIMARY_WAREHOUSES else 999,
-                x
-            )
-        )
+        # FIXED WAREHOUSE PRIORITY LOGIC
+        primary_present = [wh for wh in PRIMARY_WAREHOUSES if wh in wh_list]
+        secondary = [wh for wh in wh_list if wh not in PRIMARY_WAREHOUSES]
 
-        default_index = 0
-        for i, wh in enumerate(wh_sorted):
-            if wh in PRIMARY_WAREHOUSES:
-                default_index = i
-                break
+        wh_sorted = primary_present + sorted(secondary)
 
         selected_wh = st.selectbox(
             "Warehouse",
             wh_sorted,
-            index=default_index,
+            index=0 if len(primary_present) > 0 else 0,
             key=f"wh_{idx}"
         )
 
-        if not any(wh in PRIMARY_WAREHOUSES for wh in wh_list):
+        if len(primary_present) == 0:
             st.warning("⚠ Not available in primary warehouses")
 
         final_rows.append({
@@ -285,7 +271,7 @@ if st.session_state.po_items:
         st.session_state.final_df = df
 
 # =====================================================
-# DISPLAY EDITABLE TABLE
+# DISPLAY EDITABLE TABLE (FIXED AMOUNT AUTO UPDATE)
 # =====================================================
 
 if st.session_state.final_df is not None:
@@ -293,15 +279,13 @@ if st.session_state.final_df is not None:
     edited_df = st.data_editor(
         st.session_state.final_df,
         use_container_width=True,
-        key="po_editor",
-        column_config={
-            "AMOUNT": st.column_config.NumberColumn(disabled=True)
-        }
+        key="po_editor"
     )
 
+    # FIXED: amount auto-update logic
     edited_df["AMOUNT"] = edited_df["QUANTITY"] * edited_df["PRICE"]
 
-    st.session_state.final_df = edited_df.copy()
+    st.session_state.final_df = edited_df
 
     subtotal = edited_df["AMOUNT"].sum()
 
