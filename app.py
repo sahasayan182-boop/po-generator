@@ -4,28 +4,75 @@ import io
 import re
 from rapidfuzz import fuzz
 
-st.set_page_config(page_title="Purchase Order Generator", layout="wide")
-st.title("Purchase Order Generator")
+# =====================================================
+# PAGE CONFIG
+# =====================================================
 
-PRIMARY_WAREHOUSES = [
-    "BWD_MAIN",
-    "FBD_MAIN",
-    "CHN_CENTRL",
-    "KOL_MAIN"
-]
+st.set_page_config(
+    page_title="Purchase Order System",
+    layout="wide"
+)
 
 # =====================================================
-# SESSION STATE INIT
+# MODERN CSS (SOFT SHADOW CARDS)
+# =====================================================
+
+st.markdown("""
+<style>
+
+.main-header {
+    font-size:28px;
+    font-weight:600;
+    margin-bottom:10px;
+}
+
+.card {
+    background-color:#ffffff;
+    padding:20px;
+    border-radius:12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    margin-bottom:20px;
+}
+
+.card-title {
+    font-size:18px;
+    font-weight:600;
+    margin-bottom:15px;
+}
+
+.stock-green {color:#16a34a;font-weight:600;}
+.stock-orange {color:#ea580c;font-weight:600;}
+.stock-red {color:#dc2626;font-weight:600;}
+
+.totals-card {
+    background-color:#ffffff;
+    padding:20px;
+    border-radius:12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+.workflow {
+    font-size:14px;
+    margin-bottom:15px;
+    color:#555;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+# =====================================================
+# HEADER
+# =====================================================
+
+st.markdown('<div class="main-header">Purchase Order System</div>', unsafe_allow_html=True)
+st.divider()
+
+# =====================================================
+# SESSION STATE
 # =====================================================
 
 if "pattern_confirmed" not in st.session_state:
     st.session_state.pattern_confirmed = False
-
-if "qty_index" not in st.session_state:
-    st.session_state.qty_index = None
-
-if "price_index" not in st.session_state:
-    st.session_state.price_index = None
 
 if "po_items" not in st.session_state:
     st.session_state.po_items = []
@@ -34,19 +81,26 @@ if "final_df" not in st.session_state:
     st.session_state.final_df = None
 
 # =====================================================
-# FILE UPLOAD
+# FILE UPLOAD CARD
 # =====================================================
 
-col1, col2 = st.columns(2)
+with st.container():
 
-sales_file = col1.file_uploader("Upload Sales Register", type=["xlsx"])
-stock_file = col2.file_uploader("Upload Stock Report", type=["xlsx"])
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-title">Data Source</div>', unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+
+    sales_file = col1.file_uploader("Sales Register", type=["xlsx"])
+    stock_file = col2.file_uploader("Stock Report", type=["xlsx"])
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 if not sales_file or not stock_file:
     st.stop()
 
 # =====================================================
-# LOAD SALES
+# LOAD DATA
 # =====================================================
 
 @st.cache_data
@@ -77,16 +131,6 @@ def load_sales(file):
 
 sales_df, unique_products, customer_list = load_sales(sales_file)
 
-# =====================================================
-# CUSTOMER DROPDOWN
-# =====================================================
-
-selected_customer = st.selectbox("Customer", [""] + customer_list)
-
-# =====================================================
-# LOAD STOCK
-# =====================================================
-
 @st.cache_data
 def load_stock(file):
 
@@ -106,20 +150,47 @@ stock_lookup = stock_df.groupby("ITEM CODE")["STOCK"].sum().to_dict()
 wh_lookup = stock_df.groupby("ITEM CODE")["WH CODE"].apply(list).to_dict()
 
 # =====================================================
-# DISCOUNT GST
+# CUSTOMER & SETTINGS CARD
 # =====================================================
 
-col3, col4 = st.columns(2)
+with st.container():
 
-discount_option = col3.selectbox("Discount", ["3%", "2.5%", "0%"])
-discount_rate = float(discount_option.replace("%",""))/100
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-title">Customer & Settings</div>', unsafe_allow_html=True)
 
-gst_option = col4.selectbox("GST", ["0%", "5%", "12%", "18%", "28%"], index=3)
-gst_rate = float(gst_option.replace("%",""))/100
+    col1, col2, col3 = st.columns(3)
+
+    selected_customer = col1.selectbox("Customer", [""] + customer_list)
+
+    discount_option = col2.selectbox("Discount", ["3%", "2.5%", "0%"])
+    gst_option = col3.selectbox("GST", ["0%", "5%", "12%", "18%", "28%"], index=3)
+
+    discount_rate = float(discount_option.replace("%",""))/100
+    gst_rate = float(gst_option.replace("%",""))/100
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # =====================================================
-# FIND CANDIDATES
+# ORDER INPUT CARD
 # =====================================================
+
+with st.container():
+
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-title">Enter Order</div>', unsafe_allow_html=True)
+
+    order_text = st.text_area("", height=150)
+
+    generate_clicked = st.button("Generate Purchase Order")
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# =====================================================
+# HELPER FUNCTIONS
+# =====================================================
+
+def detect_numbers(line):
+    return re.findall(r'\b\d+\b', line)
 
 def find_candidates(query):
 
@@ -139,10 +210,6 @@ def find_candidates(query):
             })
 
     return results[:20]
-
-# =====================================================
-# PRICE ENGINE
-# =====================================================
 
 def get_price(item_code, override_price):
 
@@ -167,87 +234,21 @@ def get_price(item_code, override_price):
     return 0
 
 # =====================================================
-# DETECT NUMBERS
+# GENERATE PO ITEMS
 # =====================================================
 
-def detect_numbers(line):
-    return re.findall(r'\b\d+\b', line)
-
-# =====================================================
-# ORDER INPUT
-# =====================================================
-
-order_text = st.text_area("Enter Order")
-
-lines = [l for l in order_text.split("\n") if l.strip()]
-
-# Detect ambiguity only if price possibility exists
-ambiguous_line = None
-ambiguous_numbers = None
-
-for line in lines:
-
-    nums = detect_numbers(line)
-
-    if len(nums) >= 2:
-        ambiguous_line = line
-        ambiguous_numbers = nums
-        break
-
-pattern_needed = ambiguous_line is not None
-
-# =====================================================
-# PATTERN CONFIRMATION ONLY IF NEEDED
-# =====================================================
-
-if pattern_needed and not st.session_state.pattern_confirmed:
-
-    st.warning("Confirm Quantity and Price position using example below")
-
-    st.code(ambiguous_line)
-
-    qty_choice = st.selectbox("Quantity is:", ambiguous_numbers)
-
-    price_choice = st.selectbox("Price is:", ["None"] + ambiguous_numbers)
-
-    if st.button("Confirm Pattern"):
-
-        st.session_state.qty_index = ambiguous_numbers.index(qty_choice)
-
-        if price_choice != "None":
-            st.session_state.price_index = ambiguous_numbers.index(price_choice)
-        else:
-            st.session_state.price_index = None
-
-        st.session_state.pattern_confirmed = True
-
-        st.success("Pattern confirmed. Now click Generate Purchase Order.")
-
-# =====================================================
-# GENERATE PO BUTTON ALWAYS AVAILABLE
-# =====================================================
-
-if st.button("Generate Purchase Order"):
+if generate_clicked:
 
     st.session_state.po_items = []
+
+    lines = [l for l in order_text.split("\n") if l.strip()]
 
     for line in lines:
 
         nums = detect_numbers(line)
 
-        if st.session_state.pattern_confirmed and nums:
-
-            qty = int(nums[st.session_state.qty_index])
-
-            price_override = None
-
-            if st.session_state.price_index is not None and len(nums) > st.session_state.price_index:
-                price_override = float(nums[st.session_state.price_index])
-
-        else:
-
-            qty = int(nums[0]) if nums else 1
-            price_override = None
+        qty = int(nums[0]) if nums else 1
+        price_override = float(nums[-1]) if len(nums) >= 2 else None
 
         product = line
 
@@ -259,7 +260,6 @@ if st.button("Generate Purchase Order"):
         st.session_state.po_items.append({
 
             "raw_line": line,
-            "product": product,
             "qty": qty,
             "price": price_override,
             "candidates": candidates
@@ -267,89 +267,108 @@ if st.button("Generate Purchase Order"):
         })
 
 # =====================================================
-# CONFIRM PRODUCTS (RESTORED STYLE)
+# CONFIRM PRODUCTS CARD
 # =====================================================
 
 if st.session_state.po_items:
 
-    final_rows = []
+    with st.container():
 
-    for i, item in enumerate(st.session_state.po_items):
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">Confirm Products</div>', unsafe_allow_html=True)
 
-        st.subheader(f"Confirm Product: {item['raw_line']}")
+        final_rows = []
 
-        options = [
-            f"{c['ITEM CODE']} | {c['PRODUCT']}"
-            for c in item["candidates"]
-        ]
+        for i, item in enumerate(st.session_state.po_items):
 
-        selected = st.selectbox("Select matching product:", options, key=f"prod{i}")
+            st.markdown(f"**Original:** `{item['raw_line']}`")
 
-        code = selected.split("|")[0].strip()
+            options = [
+                f"{c['ITEM CODE']} | {c['PRODUCT']}"
+                for c in item["candidates"]
+            ]
 
-        wh_list = list(set(wh_lookup.get(code, [])))
+            selected = st.selectbox("Product", options, key=f"prod{i}")
 
-        primary = [w for w in PRIMARY_WAREHOUSES if w in wh_list]
-        secondary = [w for w in wh_list if w not in PRIMARY_WAREHOUSES]
+            code = selected.split("|")[0]
 
-        wh_sorted = primary + sorted(secondary)
+            wh_list = wh_lookup.get(code, [])
 
-        wh = st.selectbox("Warehouse:", wh_sorted, key=f"wh{i}")
+            wh = st.selectbox("Warehouse", wh_list, key=f"wh{i}")
 
-        price = get_price(code, item["price"])
+            stock = stock_lookup.get(code, 0)
 
-        final_rows.append({
+            if stock == 0:
+                st.markdown(f'<span class="stock-red">Stock: {stock}</span>', unsafe_allow_html=True)
+            elif stock <= 5:
+                st.markdown(f'<span class="stock-orange">Stock: {stock}</span>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<span class="stock-green">Stock: {stock}</span>', unsafe_allow_html=True)
 
-            "ITEM CODE": code,
-            "PRODUCT": selected,
-            "WH CODE": wh,
-            "STOCK": stock_lookup.get(code, 0),
-            "QUANTITY": item["qty"],
-            "PRICE": price
+            price = get_price(code, item["price"])
 
-        })
+            final_rows.append({
 
-    if st.button("Confirm Selection"):
+                "ITEM CODE": code,
+                "PRODUCT": selected,
+                "WH CODE": wh,
+                "STOCK": stock,
+                "QUANTITY": item["qty"],
+                "PRICE": price
 
-        df = pd.DataFrame(final_rows)
+            })
 
-        df["AMOUNT"] = df["QUANTITY"] * df["PRICE"]
+        confirm = st.button("Confirm Selection")
 
-        st.session_state.final_df = df
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        if confirm:
+
+            df = pd.DataFrame(final_rows)
+
+            df["AMOUNT"] = df["QUANTITY"] * df["PRICE"]
+
+            st.session_state.final_df = df
 
 # =====================================================
-# DISPLAY TABLE WITH TOTALS RIGHT SIDE
+# PO TABLE + TOTALS CARD
 # =====================================================
 
 if st.session_state.final_df is not None:
 
-    edited_df = st.data_editor(st.session_state.final_df, use_container_width=True)
+    col1, col2 = st.columns([4,1])
 
-    edited_df["AMOUNT"] = edited_df["QUANTITY"] * edited_df["PRICE"]
+    with col1:
 
-    st.session_state.final_df = edited_df.copy()
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">Purchase Order</div>', unsafe_allow_html=True)
 
-    col_left, col_right = st.columns([4,1])
+        edited_df = st.data_editor(st.session_state.final_df, use_container_width=True)
+
+        edited_df["AMOUNT"] = edited_df["QUANTITY"] * edited_df["PRICE"]
+
+        st.session_state.final_df = edited_df
+
+        st.markdown('</div>', unsafe_allow_html=True)
 
     subtotal = edited_df["AMOUNT"].sum()
     discount = subtotal * discount_rate
     gst = (subtotal - discount) * gst_rate
     total = subtotal - discount + gst
 
-    with col_right:
+    with col2:
+
+        st.markdown('<div class="totals-card">', unsafe_allow_html=True)
 
         st.markdown(f"""
-        <div style="text-align:right; font-size:16px; line-height:1.6;">
-            Subtotal: ₹{subtotal:,.2f}<br>
-            Discount ({discount_option}): ₹{discount:,.2f}<br>
-            GST ({gst_option}): ₹{gst:,.2f}<br>
-            <hr style="margin:4px 0;">
-            <span style="font-size:20px; font-weight:600;">
-                Total: ₹{total:,.2f}
-            </span>
-        </div>
+        Subtotal: ₹{subtotal:,.2f}<br>
+        Discount ({discount_option}): ₹{discount:,.2f}<br>
+        GST ({gst_option}): ₹{gst:,.2f}<br>
+        <hr>
+        <b>Total: ₹{total:,.2f}</b>
         """, unsafe_allow_html=True)
 
+        st.markdown('</div>', unsafe_allow_html=True)
 
     buffer = io.BytesIO()
 
