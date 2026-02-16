@@ -14,30 +14,34 @@ st.set_page_config(
 )
 
 # =====================================================
-# MODERN CSS (SOFT SHADOW CARDS)
+# MODERN GREY BACKGROUND + CARD CSS
 # =====================================================
 
 st.markdown("""
 <style>
 
-.main-header {
-    font-size:28px;
-    font-weight:600;
-    margin-bottom:10px;
+.stApp {
+    background-color: #f5f7fb;
 }
 
 .card {
-    background-color:#ffffff;
-    padding:20px;
-    border-radius:12px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-    margin-bottom:20px;
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    margin-bottom: 20px;
 }
 
 .card-title {
-    font-size:18px;
-    font-weight:600;
-    margin-bottom:15px;
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 15px;
+}
+
+.header {
+    font-size: 28px;
+    font-weight: 600;
+    margin-bottom: 10px;
 }
 
 .stock-green {color:#16a34a;font-weight:600;}
@@ -45,16 +49,10 @@ st.markdown("""
 .stock-red {color:#dc2626;font-weight:600;}
 
 .totals-card {
-    background-color:#ffffff;
-    padding:20px;
-    border-radius:12px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-}
-
-.workflow {
-    font-size:14px;
-    margin-bottom:15px;
-    color:#555;
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
 
 </style>
@@ -64,15 +62,12 @@ st.markdown("""
 # HEADER
 # =====================================================
 
-st.markdown('<div class="main-header">Purchase Order System</div>', unsafe_allow_html=True)
+st.markdown('<div class="header">Purchase Order System</div>', unsafe_allow_html=True)
 st.divider()
 
 # =====================================================
 # SESSION STATE
 # =====================================================
-
-if "pattern_confirmed" not in st.session_state:
-    st.session_state.pattern_confirmed = False
 
 if "po_items" not in st.session_state:
     st.session_state.po_items = []
@@ -81,7 +76,7 @@ if "final_df" not in st.session_state:
     st.session_state.final_df = None
 
 # =====================================================
-# FILE UPLOAD CARD
+# DATA SOURCE CARD
 # =====================================================
 
 with st.container():
@@ -100,7 +95,7 @@ if not sales_file or not stock_file:
     st.stop()
 
 # =====================================================
-# LOAD DATA
+# LOAD SALES DATA
 # =====================================================
 
 @st.cache_data
@@ -131,23 +126,30 @@ def load_sales(file):
 
 sales_df, unique_products, customer_list = load_sales(sales_file)
 
+# =====================================================
+# LOAD STOCK DATA (FIXED NORMALIZATION)
+# =====================================================
+
 @st.cache_data
 def load_stock(file):
 
     df = pd.read_excel(file)
 
-    df.columns = df.columns.str.strip()
+    df.columns = df.columns.str.strip().str.upper()
 
-    df["ITEM CODE"] = df["Item code"].astype(str).str.upper()
-    df["STOCK"] = df["Total Qty"].astype(float)
-    df["WH CODE"] = df["WH Code"].astype(str)
+    df["ITEM CODE"] = df["ITEM CODE"].astype(str).str.upper()
+    df["WH CODE"] = df["WH CODE"].astype(str).str.upper()
+    df["TOTAL QTY"] = df["TOTAL QTY"].astype(float)
 
     return df
 
 stock_df = load_stock(stock_file)
 
-stock_lookup = stock_df.groupby("ITEM CODE")["STOCK"].sum().to_dict()
+stock_lookup = stock_df.groupby("ITEM CODE")["TOTAL QTY"].sum().to_dict()
+
 wh_lookup = stock_df.groupby("ITEM CODE")["WH CODE"].apply(list).to_dict()
+
+PRIMARY_WH = ["BWD_MAIN", "FBD_MAIN", "CHN_CENTRL", "KOL_MAIN"]
 
 # =====================================================
 # CUSTOMER & SETTINGS CARD
@@ -186,11 +188,11 @@ with st.container():
     st.markdown('</div>', unsafe_allow_html=True)
 
 # =====================================================
-# HELPER FUNCTIONS
+# HELPERS
 # =====================================================
 
 def detect_numbers(line):
-    return re.findall(r'\b\d+\b', line)
+    return re.findall(r'\b\d+\.?\d*\b', line)
 
 def find_candidates(query):
 
@@ -203,7 +205,6 @@ def find_candidates(query):
         score = fuzz.partial_ratio(query, row["SEARCH"])
 
         if score > 60:
-
             results.append({
                 "ITEM CODE": row["ITEM CODE"],
                 "PRODUCT": row["PRODUCT"]
@@ -247,23 +248,25 @@ if generate_clicked:
 
         nums = detect_numbers(line)
 
-        qty = int(nums[0]) if nums else 1
-        price_override = float(nums[-1]) if len(nums) >= 2 else None
+        qty = int(float(nums[0])) if nums else 1
+
+        price_override = None
+
+        if len(nums) >= 2:
+            price_override = float(nums[-1])
 
         product = line
 
         for n in nums:
-            product = product.replace(n, "")
+            product = product.replace(str(n), "")
 
         candidates = find_candidates(product)
 
         st.session_state.po_items.append({
-
             "raw_line": line,
             "qty": qty,
             "price": price_override,
             "candidates": candidates
-
         })
 
 # =====================================================
@@ -281,7 +284,7 @@ if st.session_state.po_items:
 
         for i, item in enumerate(st.session_state.po_items):
 
-            st.markdown(f"**Original:** `{item['raw_line']}`")
+            st.subheader(item["raw_line"])
 
             options = [
                 f"{c['ITEM CODE']} | {c['PRODUCT']}"
@@ -290,11 +293,16 @@ if st.session_state.po_items:
 
             selected = st.selectbox("Product", options, key=f"prod{i}")
 
-            code = selected.split("|")[0]
+            code = selected.split("|")[0].strip()
 
-            wh_list = wh_lookup.get(code, [])
+            wh_list = list(set(wh_lookup.get(code, [])))
 
-            wh = st.selectbox("Warehouse", wh_list, key=f"wh{i}")
+            primary = [w for w in PRIMARY_WH if w in wh_list]
+            secondary = [w for w in wh_list if w not in PRIMARY_WH]
+
+            wh_sorted = primary + sorted(secondary)
+
+            wh = st.selectbox("Warehouse", wh_sorted, key=f"wh{i}")
 
             stock = stock_lookup.get(code, 0)
 
@@ -308,21 +316,19 @@ if st.session_state.po_items:
             price = get_price(code, item["price"])
 
             final_rows.append({
-
                 "ITEM CODE": code,
                 "PRODUCT": selected,
                 "WH CODE": wh,
                 "STOCK": stock,
                 "QUANTITY": item["qty"],
                 "PRICE": price
-
             })
 
-        confirm = st.button("Confirm Selection")
+        confirm_clicked = st.button("Confirm Selection")
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-        if confirm:
+        if confirm_clicked:
 
             df = pd.DataFrame(final_rows)
 
@@ -331,7 +337,7 @@ if st.session_state.po_items:
             st.session_state.final_df = df
 
 # =====================================================
-# PO TABLE + TOTALS CARD
+# DISPLAY TABLE + TOTALS
 # =====================================================
 
 if st.session_state.final_df is not None:
@@ -343,7 +349,10 @@ if st.session_state.final_df is not None:
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown('<div class="card-title">Purchase Order</div>', unsafe_allow_html=True)
 
-        edited_df = st.data_editor(st.session_state.final_df, use_container_width=True)
+        edited_df = st.data_editor(
+            st.session_state.final_df,
+            use_container_width=True
+        )
 
         edited_df["AMOUNT"] = edited_df["QUANTITY"] * edited_df["PRICE"]
 
