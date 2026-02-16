@@ -181,6 +181,7 @@ order_text = st.text_area("Enter Order")
 
 lines = [l for l in order_text.split("\n") if l.strip()]
 
+# Detect ambiguity only if price possibility exists
 ambiguous_line = None
 ambiguous_numbers = None
 
@@ -193,26 +194,21 @@ for line in lines:
         ambiguous_numbers = nums
         break
 
+pattern_needed = ambiguous_line is not None
+
 # =====================================================
-# PATTERN CONFIRMATION
+# PATTERN CONFIRMATION ONLY IF NEEDED
 # =====================================================
 
-if ambiguous_line and not st.session_state.pattern_confirmed:
+if pattern_needed and not st.session_state.pattern_confirmed:
 
-    st.warning("Please confirm Quantity and Price positions")
+    st.warning("Confirm Quantity and Price position using example below")
 
-    st.write("Example line:")
     st.code(ambiguous_line)
 
-    qty_choice = st.selectbox(
-        "Which number is Quantity?",
-        ambiguous_numbers
-    )
+    qty_choice = st.selectbox("Quantity is:", ambiguous_numbers)
 
-    price_choice = st.selectbox(
-        "Which number is Price?",
-        ["None"] + ambiguous_numbers
-    )
+    price_choice = st.selectbox("Price is:", ["None"] + ambiguous_numbers)
 
     if st.button("Confirm Pattern"):
 
@@ -225,13 +221,13 @@ if ambiguous_line and not st.session_state.pattern_confirmed:
 
         st.session_state.pattern_confirmed = True
 
-        st.success("Pattern confirmed")
+        st.success("Pattern confirmed. Now click Generate Purchase Order.")
 
 # =====================================================
-# GENERATE PO
+# GENERATE PO BUTTON ALWAYS AVAILABLE
 # =====================================================
 
-if st.session_state.pattern_confirmed and st.button("Generate Purchase Order"):
+if st.button("Generate Purchase Order"):
 
     st.session_state.po_items = []
 
@@ -239,12 +235,19 @@ if st.session_state.pattern_confirmed and st.button("Generate Purchase Order"):
 
         nums = detect_numbers(line)
 
-        qty = int(nums[st.session_state.qty_index]) if nums else 1
+        if st.session_state.pattern_confirmed and nums:
 
-        price_override = None
+            qty = int(nums[st.session_state.qty_index])
 
-        if st.session_state.price_index is not None and len(nums) > st.session_state.price_index:
-            price_override = float(nums[st.session_state.price_index])
+            price_override = None
+
+            if st.session_state.price_index is not None and len(nums) > st.session_state.price_index:
+                price_override = float(nums[st.session_state.price_index])
+
+        else:
+
+            qty = int(nums[0]) if nums else 1
+            price_override = None
 
         product = line
 
@@ -264,7 +267,7 @@ if st.session_state.pattern_confirmed and st.button("Generate Purchase Order"):
         })
 
 # =====================================================
-# CONFIRM PRODUCTS (RAW LINE DISPLAY RESTORED)
+# CONFIRM PRODUCTS (RESTORED STYLE)
 # =====================================================
 
 if st.session_state.po_items:
@@ -273,14 +276,14 @@ if st.session_state.po_items:
 
     for i, item in enumerate(st.session_state.po_items):
 
-        st.markdown(f"**Confirm Product:** `{item['raw_line']}`")
+        st.subheader(f"Confirm Product: {item['raw_line']}")
 
         options = [
             f"{c['ITEM CODE']} | {c['PRODUCT']}"
             for c in item["candidates"]
         ]
 
-        selected = st.selectbox("Product", options, key=f"prod{i}")
+        selected = st.selectbox("Select matching product:", options, key=f"prod{i}")
 
         code = selected.split("|")[0].strip()
 
@@ -291,10 +294,7 @@ if st.session_state.po_items:
 
         wh_sorted = primary + sorted(secondary)
 
-        wh = st.selectbox("Warehouse", wh_sorted, key=f"wh{i}")
-
-        if not primary:
-            st.warning("⚠ Not available in primary warehouses")
+        wh = st.selectbox("Warehouse:", wh_sorted, key=f"wh{i}")
 
         price = get_price(code, item["price"])
 
@@ -318,34 +318,33 @@ if st.session_state.po_items:
         st.session_state.final_df = df
 
 # =====================================================
-# DISPLAY TABLE
+# DISPLAY TABLE WITH TOTALS RIGHT SIDE
 # =====================================================
 
 if st.session_state.final_df is not None:
 
-    edited_df = st.data_editor(
-        st.session_state.final_df,
-        use_container_width=True
-    )
+    edited_df = st.data_editor(st.session_state.final_df, use_container_width=True)
 
     edited_df["AMOUNT"] = edited_df["QUANTITY"] * edited_df["PRICE"]
 
     st.session_state.final_df = edited_df.copy()
 
-    if st.button("🔄 Refresh Table"):
-        st.rerun()
+    col_left, col_right = st.columns([4,1])
 
     subtotal = edited_df["AMOUNT"].sum()
     discount = subtotal * discount_rate
     gst = (subtotal - discount) * gst_rate
     total = subtotal - discount + gst
 
-    st.markdown(f"""
-    **Subtotal:** ₹{subtotal:,.2f}  
-    **Discount ({discount_option}):** ₹{discount:,.2f}  
-    **GST ({gst_option}):** ₹{gst:,.2f}  
-    ## Total: ₹{total:,.2f}
-    """)
+    with col_right:
+
+        st.markdown(f"""
+        Subtotal: ₹{subtotal:,.2f}  
+        Discount ({discount_option}): ₹{discount:,.2f}  
+        GST ({gst_option}): ₹{gst:,.2f}  
+        ---
+        ## Total: ₹{total:,.2f}
+        """)
 
     buffer = io.BytesIO()
 
