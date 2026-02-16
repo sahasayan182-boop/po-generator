@@ -5,7 +5,6 @@ import re
 from rapidfuzz import fuzz
 
 st.set_page_config(page_title="Purchase Order Generator", layout="wide")
-
 st.title("Purchase Order Generator")
 
 PRIMARY_WAREHOUSES = [
@@ -16,7 +15,7 @@ PRIMARY_WAREHOUSES = [
 ]
 
 # =====================================================
-# SESSION STATE
+# SESSION STATE INIT
 # =====================================================
 
 if "pattern_confirmed" not in st.session_state:
@@ -63,6 +62,7 @@ def load_sales(file):
     df["PRODUCT"] = df["Product"].fillna("").astype(str).str.upper()
     df["OEM"] = df["Oem"].fillna("").astype(str).str.upper()
     df["CUSTOMER"] = df["Customer Name"].fillna("").astype(str).str.upper()
+
     df["RATE"] = df["Rate"].astype(float)
 
     df["SEARCH"] = df["ITEM CODE"] + " " + df["PRODUCT"] + " " + df["OEM"]
@@ -171,7 +171,6 @@ def get_price(item_code, override_price):
 # =====================================================
 
 def detect_numbers(line):
-
     return re.findall(r'\b\d+\b', line)
 
 # =====================================================
@@ -195,7 +194,7 @@ for line in lines:
         break
 
 # =====================================================
-# PATTERN CONFIRMATION UI
+# PATTERN CONFIRMATION
 # =====================================================
 
 if ambiguous_line and not st.session_state.pattern_confirmed:
@@ -207,14 +206,12 @@ if ambiguous_line and not st.session_state.pattern_confirmed:
 
     qty_choice = st.selectbox(
         "Which number is Quantity?",
-        ambiguous_numbers,
-        key="qty_select"
+        ambiguous_numbers
     )
 
     price_choice = st.selectbox(
         "Which number is Price?",
-        ["None"] + ambiguous_numbers,
-        key="price_select"
+        ["None"] + ambiguous_numbers
     )
 
     if st.button("Confirm Pattern"):
@@ -257,14 +254,17 @@ if st.session_state.pattern_confirmed and st.button("Generate Purchase Order"):
         candidates = find_candidates(product)
 
         st.session_state.po_items.append({
+
+            "raw_line": line,
             "product": product,
             "qty": qty,
             "price": price_override,
             "candidates": candidates
+
         })
 
 # =====================================================
-# CONFIRM PRODUCTS
+# CONFIRM PRODUCTS (RAW LINE DISPLAY RESTORED)
 # =====================================================
 
 if st.session_state.po_items:
@@ -272,6 +272,8 @@ if st.session_state.po_items:
     final_rows = []
 
     for i, item in enumerate(st.session_state.po_items):
+
+        st.markdown(f"**Confirm Product:** `{item['raw_line']}`")
 
         options = [
             f"{c['ITEM CODE']} | {c['PRODUCT']}"
@@ -290,6 +292,9 @@ if st.session_state.po_items:
         wh_sorted = primary + sorted(secondary)
 
         wh = st.selectbox("Warehouse", wh_sorted, key=f"wh{i}")
+
+        if not primary:
+            st.warning("⚠ Not available in primary warehouses")
 
         price = get_price(code, item["price"])
 
@@ -318,7 +323,10 @@ if st.session_state.po_items:
 
 if st.session_state.final_df is not None:
 
-    edited_df = st.data_editor(st.session_state.final_df, use_container_width=True)
+    edited_df = st.data_editor(
+        st.session_state.final_df,
+        use_container_width=True
+    )
 
     edited_df["AMOUNT"] = edited_df["QUANTITY"] * edited_df["PRICE"]
 
@@ -328,11 +336,8 @@ if st.session_state.final_df is not None:
         st.rerun()
 
     subtotal = edited_df["AMOUNT"].sum()
-
     discount = subtotal * discount_rate
-
     gst = (subtotal - discount) * gst_rate
-
     total = subtotal - discount + gst
 
     st.markdown(f"""
