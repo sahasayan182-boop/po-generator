@@ -293,6 +293,15 @@ if st.session_state.final_df is not None:
     # IMPORTANT: update session state AFTER recalculation
     st.session_state.final_df = edited_df.copy()
 
+    # Refresh button
+    col_refresh_left, col_refresh_right = st.columns([6,1])
+
+    with col_refresh_right:
+        if st.button("🔄 Refresh Table"):
+            st.session_state.final_df = st.session_state.final_df.copy()
+            st.rerun()
+
+
     # totals calculation
     subtotal = edited_df["AMOUNT"].sum()
 
