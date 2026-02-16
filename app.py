@@ -338,13 +338,18 @@ if st.session_state.final_df is not None:
 
     with col_right:
 
-        st.markdown(f"""
-        Subtotal: ₹{subtotal:,.2f}  
-        Discount ({discount_option}): ₹{discount:,.2f}  
-        GST ({gst_option}): ₹{gst:,.2f}  
-        ---
-        ## Total: ₹{total:,.2f}
-        """)
+    st.markdown(f"""
+    <div style="text-align:right; font-size:16px; line-height:1.6;">
+        Subtotal: ₹{subtotal:,.2f}<br>
+        Discount ({discount_option}): ₹{discount:,.2f}<br>
+        GST ({gst_option}): ₹{gst:,.2f}<br>
+        <hr style="margin:4px 0;">
+        <span style="font-size:20px; font-weight:600;">
+            Total: ₹{total:,.2f}
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+
 
     buffer = io.BytesIO()
 
