@@ -271,11 +271,12 @@ if st.session_state.po_items:
         st.session_state.final_df = df
 
 # =====================================================
-# DISPLAY EDITABLE TABLE (FIXED AMOUNT AUTO UPDATE)
+# DISPLAY EDITABLE TABLE (FINAL FIX FOR AMOUNT AUTO UPDATE)
 # =====================================================
 
 if st.session_state.final_df is not None:
 
+    # show editor
     edited_df = st.data_editor(
         st.session_state.final_df,
         use_container_width=True,
@@ -329,4 +330,8 @@ if st.session_state.final_df is not None:
 
     final_export.to_excel(buffer, index=False)
 
-    st.download_button("Download Purchase Order Excel", buffer.getvalue(), "PO.xlsx")
+    st.download_button(
+        "Download Purchase Order Excel",
+        buffer.getvalue(),
+        "PO.xlsx"
+    )
