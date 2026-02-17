@@ -15,7 +15,6 @@ st.markdown("""
 .stApp {
     background-color: #f5f7fb;
 }
-
 .totals-card {
     background: white;
     padding: 18px;
@@ -25,16 +24,21 @@ st.markdown("""
     min-width: 260px;
     max-width: 380px;
 }
-
 .total-line {
     display: flex;
     justify-content: space-between;
     margin-bottom: 6px;
 }
-
 .total-final {
     font-size: 20px;
     font-weight: 700;
+}
+.number-box {
+    background:#ffffff;
+    padding:10px;
+    border-radius:8px;
+    border:1px solid #e5e7eb;
+    margin-bottom:8px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -53,11 +57,8 @@ if "po_items" not in st.session_state:
 if "final_df" not in st.session_state:
     st.session_state.final_df = None
 
-if "pattern_confirmed" not in st.session_state:
-    st.session_state.pattern_confirmed = False
-
-if "pattern_mode" not in st.session_state:
-    st.session_state.pattern_mode = "auto"
+if "confirmation_data" not in st.session_state:
+    st.session_state.confirmation_data = None
 
 # =====================================================
 # DATA SOURCE
@@ -148,23 +149,17 @@ generate = st.button("Generate Purchase Order")
 # HELPERS
 # =====================================================
 
-def detect_numbers(line):
-    return re.findall(r'\d+\.?\d*', line)
+unit_pattern = re.compile(r'\d+\.?\d*(m|cm|mm|gb|tb|ghz|hz|inch|")', re.IGNORECASE)
 
-def detect_ambiguity(lines):
+def extract_numbers_with_context(line):
 
-    for line in lines:
+    parts = re.findall(r'\d+\.?\d*[a-zA-Z"]*', line)
 
-        nums = detect_numbers(line)
+    return parts
 
-        if len(nums) >= 2:
+def is_unit_number(part):
 
-            last = float(nums[-1])
-
-            if last < 10:
-                return True
-
-    return False
+    return bool(unit_pattern.match(part))
 
 def find_candidates(query):
 
@@ -177,6 +172,7 @@ def find_candidates(query):
         score = fuzz.partial_ratio(query, row["SEARCH"])
 
         if score > 60:
+
             results.append({
                 "ITEM CODE": row["ITEM CODE"],
                 "PRODUCT": row["PRODUCT"]
@@ -191,13 +187,13 @@ def get_price(code, override):
 
     if selected_customer:
 
-        cust = sales_df[
+        cust_rows = sales_df[
             (sales_df["ITEM CODE"] == code) &
             (sales_df["CUSTOMER"] == selected_customer)
         ]
 
-        if not cust.empty:
-            return cust.iloc[0]["RATE"]
+        if not cust_rows.empty:
+            return cust_rows.iloc[0]["RATE"]
 
     rows = sales_df[sales_df["ITEM CODE"] == code]
 
@@ -207,72 +203,111 @@ def get_price(code, override):
     return 0
 
 # =====================================================
-# PATTERN CONFIRMATION
+# NUMBER CONFIRMATION STEP
 # =====================================================
 
-lines = [l.strip() for l in order_text.split("\n") if l.strip()]
+if generate:
 
-if generate and detect_ambiguity(lines):
+    lines = [l.strip() for l in order_text.split("\n") if l.strip()]
 
-    st.warning("Ambiguity detected. Confirm pattern.")
-
-    mode = st.radio(
-        "Number pattern:",
-        ["First number = Quantity", "Last number = Quantity"]
-    )
-
-    if st.button("Confirm Pattern"):
-
-        if mode == "First number = Quantity":
-            st.session_state.pattern_mode = "first_qty"
-        else:
-            st.session_state.pattern_mode = "last_qty"
-
-        st.session_state.pattern_confirmed = True
-
-# =====================================================
-# GENERATE ITEMS
-# =====================================================
-
-if generate and (not detect_ambiguity(lines) or st.session_state.pattern_confirmed):
-
-    st.session_state.po_items = []
+    confirmation_data = []
 
     for line in lines:
 
-        nums = detect_numbers(line)
+        parts = extract_numbers_with_context(line)
 
-        if st.session_state.pattern_mode == "last_qty":
-            qty = int(float(nums[-1]))
-            price_override = None
-
-        else:
-
-            qty = int(float(nums[0])) if nums else 1
-
-            price_override = None
-
-            if len(nums) >= 2:
-                last = float(nums[-1])
-                if last >= 10:
-                    price_override = last
-
-        product = line
-
-        for n in nums:
-            product = product.replace(n,"")
-
-        candidates = find_candidates(product)
-
-        st.session_state.po_items.append({
-            "raw": line,
-            "qty": qty,
-            "price": price_override,
-            "candidates": candidates
+        confirmation_data.append({
+            "line": line,
+            "parts": parts
         })
 
+    st.session_state.confirmation_data = confirmation_data
+
 # =====================================================
-# CONFIRM PRODUCTS
+# SHOW CONFIRMATION UI
+# =====================================================
+
+if st.session_state.confirmation_data:
+
+    st.subheader("Confirm Numbers")
+
+    qty_price_map = {}
+
+    for idx, entry in enumerate(st.session_state.confirmation_data):
+
+        line = entry["line"]
+        parts = entry["parts"]
+
+        st.markdown(f"**{line}**")
+
+        for part in parts:
+
+            default = "Ignore"
+
+            if is_unit_number(part):
+                default = "Ignore"
+            else:
+                num = float(re.findall(r'\d+\.?\d*', part)[0])
+                if num >= 10:
+                    default = "Price"
+                else:
+                    default = "Quantity"
+
+            choice = st.radio(
+                f"{part}",
+                ["Quantity","Price","Ignore"],
+                index=["Quantity","Price","Ignore"].index(default),
+                key=f"{idx}_{part}"
+            )
+
+            qty_price_map[(line, part)] = choice
+
+    if st.button("Confirm and Generate PO"):
+
+        po_items = []
+
+        for entry in st.session_state.confirmation_data:
+
+            line = entry["line"]
+            parts = entry["parts"]
+
+            qty = None
+            price_override = None
+
+            for part in parts:
+
+                choice = qty_price_map[(line, part)]
+
+                num = float(re.findall(r'\d+\.?\d*', part)[0])
+
+                if choice == "Quantity":
+                    qty = int(num)
+
+                elif choice == "Price":
+                    price_override = num
+
+            if qty is None:
+                qty = 1
+
+            product = line
+
+            for part in parts:
+                product = product.replace(part,"")
+
+            candidates = find_candidates(product)
+
+            po_items.append({
+                "raw": line,
+                "qty": qty,
+                "price": price_override,
+                "candidates": candidates
+            })
+
+        st.session_state.po_items = po_items
+        st.session_state.confirmation_data = None
+
+# =====================================================
+# PRODUCT CONFIRMATION
 # =====================================================
 
 if st.session_state.po_items:
@@ -300,13 +335,17 @@ if st.session_state.po_items:
 
         wh = st.selectbox("Warehouse", wh_sorted, key=f"wh{i}")
 
+        stock = stock_lookup.get(code,0)
+
+        st.write(f"Stock Available: {stock}")
+
         price = get_price(code, item["price"])
 
         rows.append({
             "ITEM CODE": code,
             "PRODUCT": selected,
             "WH CODE": wh,
-            "STOCK": stock_lookup.get(code,0),
+            "STOCK": stock,
             "QUANTITY": item["qty"],
             "PRICE": price,
             "AMOUNT": price * item["qty"]
@@ -316,7 +355,7 @@ if st.session_state.po_items:
         st.session_state.final_df = pd.DataFrame(rows)
 
 # =====================================================
-# TABLE
+# TABLE + TOTALS
 # =====================================================
 
 if st.session_state.final_df is not None:
