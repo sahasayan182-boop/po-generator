@@ -11,7 +11,7 @@ from rapidfuzz import fuzz
 st.set_page_config(page_title="Purchase Order System", layout="wide")
 
 # =====================================================
-# CLEAN CSS (ONLY TOTALS CARD)
+# CSS (ONLY TOTALS CARD)
 # =====================================================
 
 st.markdown("""
@@ -26,7 +26,9 @@ st.markdown("""
     padding: 18px;
     border-radius: 10px;
     border: 1px solid #e5e7eb;
-    width: 320px;
+    width: 100%;
+    min-width: 260px;
+    max-width: 380px;
 }
 
 .total-line {
@@ -95,11 +97,11 @@ def load_sales(file):
 
     df = df.sort_values("Invoice Date", ascending=False)
 
-    unique = df.drop_duplicates("ITEM CODE")
+    unique_products = df.drop_duplicates("ITEM CODE")
 
     customers = sorted(df["CUSTOMER"].unique())
 
-    return df, unique, customers
+    return df, unique_products, customers
 
 sales_df, unique_products, customers = load_sales(sales_file)
 
@@ -160,6 +162,7 @@ def detect_numbers(line):
 def find_candidates(query):
 
     query = query.upper()
+
     results = []
 
     for _, row in unique_products.iterrows():
@@ -182,13 +185,13 @@ def get_price(code, override):
 
     if selected_customer:
 
-        rows = sales_df[
+        cust_rows = sales_df[
             (sales_df["ITEM CODE"] == code) &
             (sales_df["CUSTOMER"] == selected_customer)
         ]
 
-        if not rows.empty:
-            return rows.iloc[0]["RATE"]
+        if not cust_rows.empty:
+            return cust_rows.iloc[0]["RATE"]
 
     rows = sales_df[sales_df["ITEM CODE"] == code]
 
@@ -205,7 +208,7 @@ if generate:
 
     st.session_state.po_items = []
 
-    lines = [l for l in order_text.split("\n") if l.strip()]
+    lines = [l.strip() for l in order_text.split("\n") if l.strip()]
 
     for line in lines:
 
@@ -245,10 +248,10 @@ if st.session_state.po_items:
         options = [f"{c['ITEM CODE']} | {c['PRODUCT']}" for c in item["candidates"]]
 
         if not options:
-            st.warning("No product match found")
+            st.warning("No matching product found")
             continue
 
-        selected = st.selectbox("Product", options, key=i)
+        selected = st.selectbox("Product", options, key=f"prod{i}")
 
         code = selected.split("|")[0].strip()
 
@@ -271,13 +274,14 @@ if st.session_state.po_items:
             "ITEM CODE": code,
             "PRODUCT": selected,
             "WH CODE": wh,
-            "STOCK": stock_lookup.get(code,0),
+            "STOCK": stock_lookup.get(code, 0),
             "QUANTITY": item["qty"],
             "PRICE": price,
             "AMOUNT": price * item["qty"]
         })
 
     if st.button("Confirm Selection"):
+
         st.session_state.final_df = pd.DataFrame(rows)
 
 # =====================================================
@@ -288,66 +292,73 @@ if st.session_state.final_df is not None:
 
     st.subheader("Purchase Order")
 
-    edited = st.data_editor(
+    edited_df = st.data_editor(
         st.session_state.final_df,
         use_container_width=True,
-        key="po_editor"
+        key="po_table"
     )
 
-    edited["AMOUNT"] = edited["QUANTITY"] * edited["PRICE"]
+    edited_df["AMOUNT"] = edited_df["QUANTITY"] * edited_df["PRICE"]
 
-    st.session_state.final_df = edited
+    st.session_state.final_df = edited_df
 
-    subtotal = edited["AMOUNT"].sum()
+    subtotal = edited_df["AMOUNT"].sum()
     discount = subtotal * discount_rate
     gst = (subtotal - discount) * gst_rate
     total = subtotal - discount + gst
 
-    col1, col2 = st.columns([5,1])
+    # totals container below table, aligned right
+    col_space, col_totals = st.columns([3,1])
 
-    with col2:
+    with col_totals:
 
         st.markdown(f"""
-<div class="totals-card">
+        <div class="totals-card">
 
-<div class="total-line">
-<span>Subtotal</span>
-<span>₹{subtotal:,.2f}</span>
-</div>
+        <div class="total-line">
+        <span>Subtotal</span>
+        <span>₹{subtotal:,.2f}</span>
+        </div>
 
-<div class="total-line">
-<span>Discount ({discount_option})</span>
-<span>₹{discount:,.2f}</span>
-</div>
+        <div class="total-line">
+        <span>Discount ({discount_option})</span>
+        <span>₹{discount:,.2f}</span>
+        </div>
 
-<div class="total-line">
-<span>GST ({gst_option})</span>
-<span>₹{gst:,.2f}</span>
-</div>
+        <div class="total-line">
+        <span>GST ({gst_option})</span>
+        <span>₹{gst:,.2f}</span>
+        </div>
 
-<hr>
+        <hr>
 
-<div class="total-line total-final">
-<span>Total</span>
-<span>₹{total:,.2f}</span>
-</div>
+        <div class="total-line total-final">
+        <span>Total</span>
+        <span>₹{total:,.2f}</span>
+        </div>
 
-</div>
-""", unsafe_allow_html=True)
+        </div>
+        """, unsafe_allow_html=True)
 
-    # download
+    # =====================================================
+    # EXPORT
+    # =====================================================
 
     buffer = io.BytesIO()
 
-    export = edited.copy()
+    export_df = edited_df.copy()
 
-    totals = pd.DataFrame({
-        "PRICE":["Subtotal",f"Discount ({discount_option})",f"GST ({gst_option})","TOTAL"],
-        "AMOUNT":[subtotal,discount,gst,total]
+    totals_df = pd.DataFrame({
+        "PRICE": ["Subtotal", f"Discount ({discount_option})", f"GST ({gst_option})", "TOTAL"],
+        "AMOUNT": [subtotal, discount, gst, total]
     })
 
-    final_export = pd.concat([export, totals])
+    final_export = pd.concat([export_df, totals_df])
 
     final_export.to_excel(buffer, index=False)
 
-    st.download_button("Download PO Excel", buffer.getvalue(), "Purchase_Order.xlsx")
+    st.download_button(
+        "Download PO Excel",
+        buffer.getvalue(),
+        file_name="Purchase_Order.xlsx"
+    )
