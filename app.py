@@ -14,7 +14,7 @@ st.set_page_config(
 )
 
 # =====================================================
-# MODERN GREY BACKGROUND + CARD CSS
+# MODERN CSS (WORKING CARD SYSTEM)
 # =====================================================
 
 st.markdown("""
@@ -24,22 +24,26 @@ st.markdown("""
     background-color: #f5f7fb;
 }
 
-.card {
-    background: white;
-    padding: 20px;
+.block-container {
+    padding-top: 2rem;
+}
+
+.card-container {
+    background-color: white;
+    padding: 1.5rem;
     border-radius: 12px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-    margin-bottom: 20px;
+    margin-bottom: 1rem;
 }
 
-.card-title {
-    font-size: 18px;
-    font-weight: 600;
-    margin-bottom: 15px;
-}
-
-.header {
+.header-text {
     font-size: 28px;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+.section-title {
+    font-size: 18px;
     font-weight: 600;
     margin-bottom: 10px;
 }
@@ -48,13 +52,6 @@ st.markdown("""
 .stock-orange {color:#ea580c;font-weight:600;}
 .stock-red {color:#dc2626;font-weight:600;}
 
-.totals-card {
-    background: white;
-    padding: 20px;
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-}
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -62,8 +59,7 @@ st.markdown("""
 # HEADER
 # =====================================================
 
-st.markdown('<div class="header">Purchase Order System</div>', unsafe_allow_html=True)
-st.divider()
+st.markdown('<div class="header-text">Purchase Order System</div>', unsafe_allow_html=True)
 
 # =====================================================
 # SESSION STATE
@@ -75,18 +71,24 @@ if "po_items" not in st.session_state:
 if "final_df" not in st.session_state:
     st.session_state.final_df = None
 
+PRIMARY_WH = ["BWD_MAIN","FBD_MAIN","CHN_CENTRL","KOL_MAIN"]
+
 # =====================================================
 # DATA SOURCE CARD
 # =====================================================
 
-with st.container():
+data_card = st.container()
 
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="card-title">Data Source</div>', unsafe_allow_html=True)
+with data_card:
+
+    st.markdown('<div class="card-container">', unsafe_allow_html=True)
+
+    st.markdown('<div class="section-title">Data Source</div>', unsafe_allow_html=True)
 
     col1, col2 = st.columns(2)
 
     sales_file = col1.file_uploader("Sales Register", type=["xlsx"])
+
     stock_file = col2.file_uploader("Stock Report", type=["xlsx"])
 
     st.markdown('</div>', unsafe_allow_html=True)
@@ -95,7 +97,7 @@ if not sales_file or not stock_file:
     st.stop()
 
 # =====================================================
-# LOAD SALES DATA
+# LOAD DATA
 # =====================================================
 
 @st.cache_data
@@ -126,10 +128,6 @@ def load_sales(file):
 
 sales_df, unique_products, customer_list = load_sales(sales_file)
 
-# =====================================================
-# LOAD STOCK DATA (FIXED NORMALIZATION)
-# =====================================================
-
 @st.cache_data
 def load_stock(file):
 
@@ -149,37 +147,42 @@ stock_lookup = stock_df.groupby("ITEM CODE")["TOTAL QTY"].sum().to_dict()
 
 wh_lookup = stock_df.groupby("ITEM CODE")["WH CODE"].apply(list).to_dict()
 
-PRIMARY_WH = ["BWD_MAIN", "FBD_MAIN", "CHN_CENTRL", "KOL_MAIN"]
-
 # =====================================================
-# CUSTOMER & SETTINGS CARD
+# CUSTOMER CARD
 # =====================================================
 
-with st.container():
+cust_card = st.container()
 
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="card-title">Customer & Settings</div>', unsafe_allow_html=True)
+with cust_card:
+
+    st.markdown('<div class="card-container">', unsafe_allow_html=True)
+
+    st.markdown('<div class="section-title">Customer & Settings</div>', unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns(3)
 
     selected_customer = col1.selectbox("Customer", [""] + customer_list)
 
-    discount_option = col2.selectbox("Discount", ["3%", "2.5%", "0%"])
-    gst_option = col3.selectbox("GST", ["0%", "5%", "12%", "18%", "28%"], index=3)
+    discount_option = col2.selectbox("Discount", ["3%","2.5%","0%"])
 
-    discount_rate = float(discount_option.replace("%",""))/100
-    gst_rate = float(gst_option.replace("%",""))/100
+    gst_option = col3.selectbox("GST", ["0%","5%","12%","18%","28%"], index=3)
 
     st.markdown('</div>', unsafe_allow_html=True)
 
+discount_rate = float(discount_option.replace("%",""))/100
+gst_rate = float(gst_option.replace("%",""))/100
+
 # =====================================================
-# ORDER INPUT CARD
+# ORDER CARD
 # =====================================================
 
-with st.container():
+order_card = st.container()
 
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="card-title">Enter Order</div>', unsafe_allow_html=True)
+with order_card:
+
+    st.markdown('<div class="card-container">', unsafe_allow_html=True)
+
+    st.markdown('<div class="section-title">Enter Order</div>', unsafe_allow_html=True)
 
     order_text = st.text_area("", height=150)
 
@@ -192,7 +195,7 @@ with st.container():
 # =====================================================
 
 def detect_numbers(line):
-    return re.findall(r'\b\d+\.?\d*\b', line)
+    return re.findall(r'\d+\.?\d*', line)
 
 def find_candidates(query):
 
@@ -212,22 +215,22 @@ def find_candidates(query):
 
     return results[:20]
 
-def get_price(item_code, override_price):
+def get_price(code, override):
 
-    if override_price:
-        return override_price
+    if override:
+        return override
 
     if selected_customer:
 
-        cust_rows = sales_df[
-            (sales_df["ITEM CODE"] == item_code) &
+        cust = sales_df[
+            (sales_df["ITEM CODE"] == code) &
             (sales_df["CUSTOMER"] == selected_customer)
         ]
 
-        if not cust_rows.empty:
-            return cust_rows.iloc[0]["RATE"]
+        if not cust.empty:
+            return cust.iloc[0]["RATE"]
 
-    rows = sales_df[sales_df["ITEM CODE"] == item_code]
+    rows = sales_df[sales_df["ITEM CODE"] == code]
 
     if not rows.empty:
         return rows.iloc[0]["RATE"]
@@ -235,7 +238,7 @@ def get_price(item_code, override_price):
     return 0
 
 # =====================================================
-# GENERATE PO ITEMS
+# GENERATE ITEMS
 # =====================================================
 
 if generate_clicked:
@@ -250,15 +253,12 @@ if generate_clicked:
 
         qty = int(float(nums[0])) if nums else 1
 
-        price_override = None
-
-        if len(nums) >= 2:
-            price_override = float(nums[-1])
+        price_override = float(nums[-1]) if len(nums)>=2 else None
 
         product = line
 
         for n in nums:
-            product = product.replace(str(n), "")
+            product = product.replace(n,"")
 
         candidates = find_candidates(product)
 
@@ -270,126 +270,122 @@ if generate_clicked:
         })
 
 # =====================================================
-# CONFIRM PRODUCTS CARD
+# CONFIRM PRODUCTS
 # =====================================================
 
 if st.session_state.po_items:
 
-    with st.container():
+    confirm_card = st.container()
 
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<div class="card-title">Confirm Products</div>', unsafe_allow_html=True)
+    with confirm_card:
 
-        final_rows = []
+        st.markdown('<div class="card-container">', unsafe_allow_html=True)
 
-        for i, item in enumerate(st.session_state.po_items):
+        st.markdown('<div class="section-title">Confirm Products</div>', unsafe_allow_html=True)
+
+        final_rows=[]
+
+        for i,item in enumerate(st.session_state.po_items):
 
             st.subheader(item["raw_line"])
 
-            options = [
-                f"{c['ITEM CODE']} | {c['PRODUCT']}"
-                for c in item["candidates"]
-            ]
+            options=[f"{c['ITEM CODE']} | {c['PRODUCT']}" for c in item["candidates"]]
 
-            selected = st.selectbox("Product", options, key=f"prod{i}")
+            selected=st.selectbox("Product",options,key=f"prod{i}")
 
-            code = selected.split("|")[0].strip()
+            code=selected.split("|")[0].strip()
 
-            wh_list = list(set(wh_lookup.get(code, [])))
+            wh_list=list(set(wh_lookup.get(code,[])))
 
-            primary = [w for w in PRIMARY_WH if w in wh_list]
-            secondary = [w for w in wh_list if w not in PRIMARY_WH]
+            primary=[w for w in PRIMARY_WH if w in wh_list]
+            secondary=[w for w in wh_list if w not in PRIMARY_WH]
 
-            wh_sorted = primary + sorted(secondary)
+            wh_sorted=primary+sorted(secondary)
 
-            wh = st.selectbox("Warehouse", wh_sorted, key=f"wh{i}")
+            wh=st.selectbox("Warehouse",wh_sorted,key=f"wh{i}")
 
-            stock = stock_lookup.get(code, 0)
+            stock=stock_lookup.get(code,0)
 
-            if stock == 0:
-                st.markdown(f'<span class="stock-red">Stock: {stock}</span>', unsafe_allow_html=True)
-            elif stock <= 5:
-                st.markdown(f'<span class="stock-orange">Stock: {stock}</span>', unsafe_allow_html=True)
+            if stock>5:
+                st.markdown(f'<span class="stock-green">Stock: {stock}</span>',unsafe_allow_html=True)
+            elif stock>0:
+                st.markdown(f'<span class="stock-orange">Stock: {stock}</span>',unsafe_allow_html=True)
             else:
-                st.markdown(f'<span class="stock-green">Stock: {stock}</span>', unsafe_allow_html=True)
+                st.markdown(f'<span class="stock-red">Stock: {stock}</span>',unsafe_allow_html=True)
 
-            price = get_price(code, item["price"])
+            price=get_price(code,item["price"])
 
             final_rows.append({
-                "ITEM CODE": code,
-                "PRODUCT": selected,
-                "WH CODE": wh,
-                "STOCK": stock,
-                "QUANTITY": item["qty"],
-                "PRICE": price
+                "ITEM CODE":code,
+                "PRODUCT":selected,
+                "WH CODE":wh,
+                "STOCK":stock,
+                "QUANTITY":item["qty"],
+                "PRICE":price
             })
 
-        confirm_clicked = st.button("Confirm Selection")
+        confirm_clicked=st.button("Confirm Selection")
 
         st.markdown('</div>', unsafe_allow_html=True)
 
         if confirm_clicked:
 
-            df = pd.DataFrame(final_rows)
+            df=pd.DataFrame(final_rows)
 
-            df["AMOUNT"] = df["QUANTITY"] * df["PRICE"]
+            df["AMOUNT"]=df["QUANTITY"]*df["PRICE"]
 
-            st.session_state.final_df = df
+            st.session_state.final_df=df
 
 # =====================================================
-# DISPLAY TABLE + TOTALS
+# TABLE + TOTALS
 # =====================================================
 
 if st.session_state.final_df is not None:
 
-    col1, col2 = st.columns([4,1])
+    col1,col2=st.columns([4,1])
 
     with col1:
 
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<div class="card-title">Purchase Order</div>', unsafe_allow_html=True)
+        st.markdown('<div class="card-container">', unsafe_allow_html=True)
 
-        edited_df = st.data_editor(
-            st.session_state.final_df,
-            use_container_width=True
-        )
+        edited=st.data_editor(st.session_state.final_df,use_container_width=True)
 
-        edited_df["AMOUNT"] = edited_df["QUANTITY"] * edited_df["PRICE"]
+        edited["AMOUNT"]=edited["QUANTITY"]*edited["PRICE"]
 
-        st.session_state.final_df = edited_df
+        st.session_state.final_df=edited
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-    subtotal = edited_df["AMOUNT"].sum()
-    discount = subtotal * discount_rate
-    gst = (subtotal - discount) * gst_rate
-    total = subtotal - discount + gst
+    subtotal=edited["AMOUNT"].sum()
+    discount=subtotal*discount_rate
+    gst=(subtotal-discount)*gst_rate
+    total=subtotal-discount+gst
 
     with col2:
 
-        st.markdown('<div class="totals-card">', unsafe_allow_html=True)
+        st.markdown('<div class="card-container">', unsafe_allow_html=True)
 
         st.markdown(f"""
-        Subtotal: ₹{subtotal:,.2f}<br>
-        Discount ({discount_option}): ₹{discount:,.2f}<br>
-        GST ({gst_option}): ₹{gst:,.2f}<br>
-        <hr>
-        <b>Total: ₹{total:,.2f}</b>
-        """, unsafe_allow_html=True)
+        Subtotal: ₹{subtotal:,.2f}  
+        Discount ({discount_option}): ₹{discount:,.2f}  
+        GST ({gst_option}): ₹{gst:,.2f}  
+        ---
+        **Total: ₹{total:,.2f}**
+        """)
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-    buffer = io.BytesIO()
+    buffer=io.BytesIO()
 
-    export_df = edited_df.copy()
+    export=edited.copy()
 
-    totals = pd.DataFrame({
-        "PRICE": ["Subtotal", f"Discount ({discount_option})", f"GST ({gst_option})", "TOTAL"],
-        "AMOUNT": [subtotal, discount, gst, total]
+    totals=pd.DataFrame({
+        "PRICE":["Subtotal",f"Discount ({discount_option})",f"GST ({gst_option})","TOTAL"],
+        "AMOUNT":[subtotal,discount,gst,total]
     })
 
-    final_export = pd.concat([export_df, totals])
+    final_export=pd.concat([export,totals])
 
-    final_export.to_excel(buffer, index=False)
+    final_export.to_excel(buffer,index=False)
 
-    st.download_button("Download Excel", buffer.getvalue(), "PO.xlsx")
+    st.download_button("Download Excel",buffer.getvalue(),"PO.xlsx")
