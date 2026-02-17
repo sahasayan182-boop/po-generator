@@ -4,19 +4,14 @@ import io
 import re
 from rapidfuzz import fuzz
 
-# =====================================================
-# PAGE CONFIG
-# =====================================================
-
 st.set_page_config(page_title="Purchase Order System", layout="wide")
 
 # =====================================================
-# CSS (ONLY TOTALS CARD)
+# CSS
 # =====================================================
 
 st.markdown("""
 <style>
-
 .stApp {
     background-color: #f5f7fb;
 }
@@ -41,18 +36,15 @@ st.markdown("""
     font-size: 20px;
     font-weight: 700;
 }
-
 </style>
 """, unsafe_allow_html=True)
 
-# =====================================================
-# HEADER
-# =====================================================
-
 st.title("Purchase Order System")
 
+PRIMARY_WH = ["BWD_MAIN","FBD_MAIN","CHN_CENTRL","KOL_MAIN"]
+
 # =====================================================
-# SESSION STATE
+# SESSION STATE INIT
 # =====================================================
 
 if "po_items" not in st.session_state:
@@ -61,7 +53,11 @@ if "po_items" not in st.session_state:
 if "final_df" not in st.session_state:
     st.session_state.final_df = None
 
-PRIMARY_WH = ["BWD_MAIN","FBD_MAIN","CHN_CENTRL","KOL_MAIN"]
+if "pattern_confirmed" not in st.session_state:
+    st.session_state.pattern_confirmed = False
+
+if "pattern_mode" not in st.session_state:
+    st.session_state.pattern_mode = "auto"
 
 # =====================================================
 # DATA SOURCE
@@ -78,7 +74,7 @@ if not sales_file or not stock_file:
     st.stop()
 
 # =====================================================
-# LOAD SALES DATA
+# LOAD DATA
 # =====================================================
 
 @st.cache_data
@@ -97,17 +93,13 @@ def load_sales(file):
 
     df = df.sort_values("Invoice Date", ascending=False)
 
-    unique_products = df.drop_duplicates("ITEM CODE")
+    unique = df.drop_duplicates("ITEM CODE")
 
     customers = sorted(df["CUSTOMER"].unique())
 
-    return df, unique_products, customers
+    return df, unique, customers
 
 sales_df, unique_products, customers = load_sales(sales_file)
-
-# =====================================================
-# LOAD STOCK DATA
-# =====================================================
 
 @st.cache_data
 def load_stock(file):
@@ -159,6 +151,21 @@ generate = st.button("Generate Purchase Order")
 def detect_numbers(line):
     return re.findall(r'\d+\.?\d*', line)
 
+def detect_ambiguity(lines):
+
+    for line in lines:
+
+        nums = detect_numbers(line)
+
+        if len(nums) >= 2:
+
+            last = float(nums[-1])
+
+            if last < 10:
+                return True
+
+    return False
+
 def find_candidates(query):
 
     query = query.upper()
@@ -170,7 +177,6 @@ def find_candidates(query):
         score = fuzz.partial_ratio(query, row["SEARCH"])
 
         if score > 60:
-
             results.append({
                 "ITEM CODE": row["ITEM CODE"],
                 "PRODUCT": row["PRODUCT"]
@@ -180,18 +186,18 @@ def find_candidates(query):
 
 def get_price(code, override):
 
-    if override:
+    if override is not None:
         return override
 
     if selected_customer:
 
-        cust_rows = sales_df[
+        cust = sales_df[
             (sales_df["ITEM CODE"] == code) &
             (sales_df["CUSTOMER"] == selected_customer)
         ]
 
-        if not cust_rows.empty:
-            return cust_rows.iloc[0]["RATE"]
+        if not cust.empty:
+            return cust.iloc[0]["RATE"]
 
     rows = sales_df[sales_df["ITEM CODE"] == code]
 
@@ -201,26 +207,60 @@ def get_price(code, override):
     return 0
 
 # =====================================================
+# PATTERN CONFIRMATION
+# =====================================================
+
+lines = [l.strip() for l in order_text.split("\n") if l.strip()]
+
+if generate and detect_ambiguity(lines):
+
+    st.warning("Ambiguity detected. Confirm pattern.")
+
+    mode = st.radio(
+        "Number pattern:",
+        ["First number = Quantity", "Last number = Quantity"]
+    )
+
+    if st.button("Confirm Pattern"):
+
+        if mode == "First number = Quantity":
+            st.session_state.pattern_mode = "first_qty"
+        else:
+            st.session_state.pattern_mode = "last_qty"
+
+        st.session_state.pattern_confirmed = True
+
+# =====================================================
 # GENERATE ITEMS
 # =====================================================
 
-if generate:
+if generate and (not detect_ambiguity(lines) or st.session_state.pattern_confirmed):
 
     st.session_state.po_items = []
-
-    lines = [l.strip() for l in order_text.split("\n") if l.strip()]
 
     for line in lines:
 
         nums = detect_numbers(line)
 
-        qty = int(float(nums[0])) if nums else 1
-        price_override = float(nums[-1]) if len(nums) >= 2 else None
+        if st.session_state.pattern_mode == "last_qty":
+            qty = int(float(nums[-1]))
+            price_override = None
+
+        else:
+
+            qty = int(float(nums[0])) if nums else 1
+
+            price_override = None
+
+            if len(nums) >= 2:
+                last = float(nums[-1])
+                if last >= 10:
+                    price_override = last
 
         product = line
 
         for n in nums:
-            product = product.replace(n, "")
+            product = product.replace(n,"")
 
         candidates = find_candidates(product)
 
@@ -241,19 +281,15 @@ if st.session_state.po_items:
 
     rows = []
 
-    for i, item in enumerate(st.session_state.po_items):
+    for i,item in enumerate(st.session_state.po_items):
 
         st.markdown(f"**{item['raw']}**")
 
         options = [f"{c['ITEM CODE']} | {c['PRODUCT']}" for c in item["candidates"]]
 
-        if not options:
-            st.warning("No matching product found")
-            continue
-
         selected = st.selectbox("Product", options, key=f"prod{i}")
 
-        code = selected.split("|")[0].strip()
+        code = selected.split("|")[0]
 
         wh_list = wh_lookup.get(code, [])
 
@@ -261,10 +297,6 @@ if st.session_state.po_items:
         secondary = [w for w in wh_list if w not in PRIMARY_WH]
 
         wh_sorted = primary + sorted(secondary)
-
-        if not wh_sorted:
-            st.warning("No warehouse stock available")
-            continue
 
         wh = st.selectbox("Warehouse", wh_sorted, key=f"wh{i}")
 
@@ -274,18 +306,17 @@ if st.session_state.po_items:
             "ITEM CODE": code,
             "PRODUCT": selected,
             "WH CODE": wh,
-            "STOCK": stock_lookup.get(code, 0),
+            "STOCK": stock_lookup.get(code,0),
             "QUANTITY": item["qty"],
             "PRICE": price,
             "AMOUNT": price * item["qty"]
         })
 
     if st.button("Confirm Selection"):
-
         st.session_state.final_df = pd.DataFrame(rows)
 
 # =====================================================
-# TABLE + TOTALS
+# TABLE
 # =====================================================
 
 if st.session_state.final_df is not None:
@@ -298,6 +329,11 @@ if st.session_state.final_df is not None:
         key="po_table"
     )
 
+    if st.button("Refresh Table"):
+        edited_df["AMOUNT"] = edited_df["QUANTITY"] * edited_df["PRICE"]
+        st.session_state.final_df = edited_df
+        st.rerun()
+
     edited_df["AMOUNT"] = edited_df["QUANTITY"] * edited_df["PRICE"]
 
     st.session_state.final_df = edited_df
@@ -307,58 +343,31 @@ if st.session_state.final_df is not None:
     gst = (subtotal - discount) * gst_rate
     total = subtotal - discount + gst
 
-    # totals container below table, aligned right
     col_space, col_totals = st.columns([3,1])
 
     with col_totals:
 
         st.markdown(f"""
         <div class="totals-card">
-
-        <div class="total-line">
-        <span>Subtotal</span>
-        <span>₹{subtotal:,.2f}</span>
-        </div>
-
-        <div class="total-line">
-        <span>Discount ({discount_option})</span>
-        <span>₹{discount:,.2f}</span>
-        </div>
-
-        <div class="total-line">
-        <span>GST ({gst_option})</span>
-        <span>₹{gst:,.2f}</span>
-        </div>
-
+        <div class="total-line"><span>Subtotal</span><span>₹{subtotal:,.2f}</span></div>
+        <div class="total-line"><span>Discount ({discount_option})</span><span>₹{discount:,.2f}</span></div>
+        <div class="total-line"><span>GST ({gst_option})</span><span>₹{gst:,.2f}</span></div>
         <hr>
-
-        <div class="total-line total-final">
-        <span>Total</span>
-        <span>₹{total:,.2f}</span>
-        </div>
-
+        <div class="total-line total-final"><span>Total</span><span>₹{total:,.2f}</span></div>
         </div>
         """, unsafe_allow_html=True)
-
-    # =====================================================
-    # EXPORT
-    # =====================================================
 
     buffer = io.BytesIO()
 
     export_df = edited_df.copy()
 
     totals_df = pd.DataFrame({
-        "PRICE": ["Subtotal", f"Discount ({discount_option})", f"GST ({gst_option})", "TOTAL"],
-        "AMOUNT": [subtotal, discount, gst, total]
+        "PRICE":["Subtotal",f"Discount ({discount_option})",f"GST ({gst_option})","TOTAL"],
+        "AMOUNT":[subtotal,discount,gst,total]
     })
 
     final_export = pd.concat([export_df, totals_df])
 
     final_export.to_excel(buffer, index=False)
 
-    st.download_button(
-        "Download PO Excel",
-        buffer.getvalue(),
-        file_name="Purchase_Order.xlsx"
-    )
+    st.download_button("Download PO Excel", buffer.getvalue(), "Purchase_Order.xlsx")
