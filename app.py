@@ -8,13 +8,10 @@ from rapidfuzz import fuzz
 # PAGE CONFIG
 # =====================================================
 
-st.set_page_config(
-    page_title="Purchase Order System",
-    layout="wide"
-)
+st.set_page_config(page_title="Purchase Order System", layout="wide")
 
 # =====================================================
-# MODERN CSS (WORKING CARD SYSTEM)
+# REAL MODERN CARD CSS (WORKS WITH STREAMLIT)
 # =====================================================
 
 st.markdown("""
@@ -24,28 +21,28 @@ st.markdown("""
     background-color: #f5f7fb;
 }
 
-.block-container {
-    padding-top: 2rem;
-}
-
-.card-container {
-    background-color: white;
-    padding: 1.5rem;
+.card {
+    background: white;
+    padding: 20px;
     border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-    margin-bottom: 1rem;
+    border: 1px solid #e5e7eb;
+    margin-bottom: 16px;
 }
 
-.header-text {
-    font-size: 28px;
-    font-weight: 600;
-    margin-bottom: 10px;
+.card-shadow {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.06);
 }
 
 .section-title {
     font-size: 18px;
     font-weight: 600;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
+}
+
+.main-header {
+    font-size: 28px;
+    font-weight: 600;
+    margin-bottom: 12px;
 }
 
 .stock-green {color:#16a34a;font-weight:600;}
@@ -56,10 +53,25 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =====================================================
+# CARD HELPER FUNCTION (CRITICAL FIX)
+# =====================================================
+
+def card(title=None):
+    container = st.container()
+    with container:
+        st.markdown('<div class="card card-shadow">', unsafe_allow_html=True)
+        if title:
+            st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
+    return container
+
+def end_card():
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# =====================================================
 # HEADER
 # =====================================================
 
-st.markdown('<div class="header-text">Purchase Order System</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">Purchase Order System</div>', unsafe_allow_html=True)
 
 # =====================================================
 # SESSION STATE
@@ -77,27 +89,20 @@ PRIMARY_WH = ["BWD_MAIN","FBD_MAIN","CHN_CENTRL","KOL_MAIN"]
 # DATA SOURCE CARD
 # =====================================================
 
-data_card = st.container()
+c = card("Data Source")
 
-with data_card:
+col1, col2 = st.columns(2)
 
-    st.markdown('<div class="card-container">', unsafe_allow_html=True)
+sales_file = col1.file_uploader("Sales Register", type=["xlsx"])
+stock_file = col2.file_uploader("Stock Report", type=["xlsx"])
 
-    st.markdown('<div class="section-title">Data Source</div>', unsafe_allow_html=True)
-
-    col1, col2 = st.columns(2)
-
-    sales_file = col1.file_uploader("Sales Register", type=["xlsx"])
-
-    stock_file = col2.file_uploader("Stock Report", type=["xlsx"])
-
-    st.markdown('</div>', unsafe_allow_html=True)
+end_card()
 
 if not sales_file or not stock_file:
     st.stop()
 
 # =====================================================
-# LOAD DATA
+# LOAD SALES
 # =====================================================
 
 @st.cache_data
@@ -128,6 +133,10 @@ def load_sales(file):
 
 sales_df, unique_products, customer_list = load_sales(sales_file)
 
+# =====================================================
+# LOAD STOCK (FIXED)
+# =====================================================
+
 @st.cache_data
 def load_stock(file):
 
@@ -144,30 +153,23 @@ def load_stock(file):
 stock_df = load_stock(stock_file)
 
 stock_lookup = stock_df.groupby("ITEM CODE")["TOTAL QTY"].sum().to_dict()
-
 wh_lookup = stock_df.groupby("ITEM CODE")["WH CODE"].apply(list).to_dict()
 
 # =====================================================
 # CUSTOMER CARD
 # =====================================================
 
-cust_card = st.container()
+card("Customer & Settings")
 
-with cust_card:
+col1, col2, col3 = st.columns(3)
 
-    st.markdown('<div class="card-container">', unsafe_allow_html=True)
+selected_customer = col1.selectbox("Customer", [""] + customer_list)
 
-    st.markdown('<div class="section-title">Customer & Settings</div>', unsafe_allow_html=True)
+discount_option = col2.selectbox("Discount", ["3%","2.5%","0%"])
 
-    col1, col2, col3 = st.columns(3)
+gst_option = col3.selectbox("GST", ["0%","5%","12%","18%","28%"], index=3)
 
-    selected_customer = col1.selectbox("Customer", [""] + customer_list)
-
-    discount_option = col2.selectbox("Discount", ["3%","2.5%","0%"])
-
-    gst_option = col3.selectbox("GST", ["0%","5%","12%","18%","28%"], index=3)
-
-    st.markdown('</div>', unsafe_allow_html=True)
+end_card()
 
 discount_rate = float(discount_option.replace("%",""))/100
 gst_rate = float(gst_option.replace("%",""))/100
@@ -176,19 +178,13 @@ gst_rate = float(gst_option.replace("%",""))/100
 # ORDER CARD
 # =====================================================
 
-order_card = st.container()
+card("Enter Order")
 
-with order_card:
+order_text = st.text_area("", height=150)
 
-    st.markdown('<div class="card-container">', unsafe_allow_html=True)
+generate_clicked = st.button("Generate Purchase Order")
 
-    st.markdown('<div class="section-title">Enter Order</div>', unsafe_allow_html=True)
-
-    order_text = st.text_area("", height=150)
-
-    generate_clicked = st.button("Generate Purchase Order")
-
-    st.markdown('</div>', unsafe_allow_html=True)
+end_card()
 
 # =====================================================
 # HELPERS
@@ -208,6 +204,7 @@ def find_candidates(query):
         score = fuzz.partial_ratio(query, row["SEARCH"])
 
         if score > 60:
+
             results.append({
                 "ITEM CODE": row["ITEM CODE"],
                 "PRODUCT": row["PRODUCT"]
@@ -270,71 +267,65 @@ if generate_clicked:
         })
 
 # =====================================================
-# CONFIRM PRODUCTS
+# CONFIRM PRODUCTS CARD
 # =====================================================
 
 if st.session_state.po_items:
 
-    confirm_card = st.container()
+    card("Confirm Products")
 
-    with confirm_card:
+    final_rows=[]
 
-        st.markdown('<div class="card-container">', unsafe_allow_html=True)
+    for i,item in enumerate(st.session_state.po_items):
 
-        st.markdown('<div class="section-title">Confirm Products</div>', unsafe_allow_html=True)
+        st.subheader(item["raw_line"])
 
-        final_rows=[]
+        options=[f"{c['ITEM CODE']} | {c['PRODUCT']}" for c in item["candidates"]]
 
-        for i,item in enumerate(st.session_state.po_items):
+        selected=st.selectbox("Product",options,key=f"prod{i}")
 
-            st.subheader(item["raw_line"])
+        code=selected.split("|")[0].strip()
 
-            options=[f"{c['ITEM CODE']} | {c['PRODUCT']}" for c in item["candidates"]]
+        wh_list=list(set(wh_lookup.get(code,[])))
 
-            selected=st.selectbox("Product",options,key=f"prod{i}")
+        primary=[w for w in PRIMARY_WH if w in wh_list]
+        secondary=[w for w in wh_list if w not in PRIMARY_WH]
 
-            code=selected.split("|")[0].strip()
+        wh_sorted=primary+sorted(secondary)
 
-            wh_list=list(set(wh_lookup.get(code,[])))
+        wh=st.selectbox("Warehouse",wh_sorted,key=f"wh{i}")
 
-            primary=[w for w in PRIMARY_WH if w in wh_list]
-            secondary=[w for w in wh_list if w not in PRIMARY_WH]
+        stock=stock_lookup.get(code,0)
 
-            wh_sorted=primary+sorted(secondary)
+        if stock>5:
+            st.markdown(f'<span class="stock-green">Stock: {stock}</span>',unsafe_allow_html=True)
+        elif stock>0:
+            st.markdown(f'<span class="stock-orange">Stock: {stock}</span>',unsafe_allow_html=True)
+        else:
+            st.markdown(f'<span class="stock-red">Stock: {stock}</span>',unsafe_allow_html=True)
 
-            wh=st.selectbox("Warehouse",wh_sorted,key=f"wh{i}")
+        price=get_price(code,item["price"])
 
-            stock=stock_lookup.get(code,0)
+        final_rows.append({
+            "ITEM CODE":code,
+            "PRODUCT":selected,
+            "WH CODE":wh,
+            "STOCK":stock,
+            "QUANTITY":item["qty"],
+            "PRICE":price
+        })
 
-            if stock>5:
-                st.markdown(f'<span class="stock-green">Stock: {stock}</span>',unsafe_allow_html=True)
-            elif stock>0:
-                st.markdown(f'<span class="stock-orange">Stock: {stock}</span>',unsafe_allow_html=True)
-            else:
-                st.markdown(f'<span class="stock-red">Stock: {stock}</span>',unsafe_allow_html=True)
+    confirm_clicked=st.button("Confirm Selection")
 
-            price=get_price(code,item["price"])
+    end_card()
 
-            final_rows.append({
-                "ITEM CODE":code,
-                "PRODUCT":selected,
-                "WH CODE":wh,
-                "STOCK":stock,
-                "QUANTITY":item["qty"],
-                "PRICE":price
-            })
+    if confirm_clicked:
 
-        confirm_clicked=st.button("Confirm Selection")
+        df=pd.DataFrame(final_rows)
 
-        st.markdown('</div>', unsafe_allow_html=True)
+        df["AMOUNT"]=df["QUANTITY"]*df["PRICE"]
 
-        if confirm_clicked:
-
-            df=pd.DataFrame(final_rows)
-
-            df["AMOUNT"]=df["QUANTITY"]*df["PRICE"]
-
-            st.session_state.final_df=df
+        st.session_state.final_df=df
 
 # =====================================================
 # TABLE + TOTALS
@@ -346,7 +337,7 @@ if st.session_state.final_df is not None:
 
     with col1:
 
-        st.markdown('<div class="card-container">', unsafe_allow_html=True)
+        card("Purchase Order")
 
         edited=st.data_editor(st.session_state.final_df,use_container_width=True)
 
@@ -354,7 +345,7 @@ if st.session_state.final_df is not None:
 
         st.session_state.final_df=edited
 
-        st.markdown('</div>', unsafe_allow_html=True)
+        end_card()
 
     subtotal=edited["AMOUNT"].sum()
     discount=subtotal*discount_rate
@@ -363,17 +354,21 @@ if st.session_state.final_df is not None:
 
     with col2:
 
-        st.markdown('<div class="card-container">', unsafe_allow_html=True)
+        card("Totals")
 
         st.markdown(f"""
-        Subtotal: ₹{subtotal:,.2f}  
-        Discount ({discount_option}): ₹{discount:,.2f}  
-        GST ({gst_option}): ₹{gst:,.2f}  
-        ---
-        **Total: ₹{total:,.2f}**
-        """)
+Subtotal: ₹{subtotal:,.2f}
 
-        st.markdown('</div>', unsafe_allow_html=True)
+Discount ({discount_option}): ₹{discount:,.2f}
+
+GST ({gst_option}): ₹{gst:,.2f}
+
+---
+
+**Total: ₹{total:,.2f}**
+""")
+
+        end_card()
 
     buffer=io.BytesIO()
 
