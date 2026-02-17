@@ -104,7 +104,6 @@ if not sales_file or not stock_file:
 # =====================================================
 
 @st.cache_data
-_attachment
 def load_sales(file):
 
     df=pd.read_excel(file,sheet_name="data")
