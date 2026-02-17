@@ -11,7 +11,7 @@ from rapidfuzz import fuzz
 st.set_page_config(page_title="Purchase Order System", layout="wide")
 
 # =====================================================
-# REAL MODERN CARD CSS (WORKS WITH STREAMLIT)
+# MODERN CLEAN UI CSS
 # =====================================================
 
 st.markdown("""
@@ -21,57 +21,54 @@ st.markdown("""
     background-color: #f5f7fb;
 }
 
-.card {
-    background: white;
-    padding: 20px;
-    border-radius: 12px;
-    border: 1px solid #e5e7eb;
-    margin-bottom: 16px;
+.main-title {
+    font-size: 28px;
+    font-weight: 600;
+    margin-bottom: 20px;
 }
 
-.card-shadow {
-    box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+.section-card {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    border: 1px solid #e5e7eb;
+    margin-bottom: 15px;
 }
 
 .section-title {
     font-size: 18px;
     font-weight: 600;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
 }
 
-.main-header {
-    font-size: 28px;
-    font-weight: 600;
-    margin-bottom: 12px;
+.totals-card {
+    background: white;
+    padding: 18px;
+    border-radius: 10px;
+    border: 1px solid #e5e7eb;
+    width: 300px;
+    float: right;
 }
 
-.stock-green {color:#16a34a;font-weight:600;}
-.stock-orange {color:#ea580c;font-weight:600;}
-.stock-red {color:#dc2626;font-weight:600;}
+.total-line {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.total-final {
+    font-size: 20px;
+    font-weight: 700;
+}
 
 </style>
 """, unsafe_allow_html=True)
 
 # =====================================================
-# CARD HELPER FUNCTION (CRITICAL FIX)
-# =====================================================
-
-def card(title=None):
-    container = st.container()
-    with container:
-        st.markdown('<div class="card card-shadow">', unsafe_allow_html=True)
-        if title:
-            st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
-    return container
-
-def end_card():
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# =====================================================
 # HEADER
 # =====================================================
 
-st.markdown('<div class="main-header">Purchase Order System</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">Purchase Order System</div>', unsafe_allow_html=True)
 
 # =====================================================
 # SESSION STATE
@@ -86,148 +83,141 @@ if "final_df" not in st.session_state:
 PRIMARY_WH = ["BWD_MAIN","FBD_MAIN","CHN_CENTRL","KOL_MAIN"]
 
 # =====================================================
-# DATA SOURCE CARD
+# DATA SOURCE
 # =====================================================
 
-c = card("Data Source")
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">Data Source</div>', unsafe_allow_html=True)
 
-col1, col2 = st.columns(2)
+col1,col2=st.columns(2)
 
-sales_file = col1.file_uploader("Sales Register", type=["xlsx"])
-stock_file = col2.file_uploader("Stock Report", type=["xlsx"])
+sales_file=col1.file_uploader("Sales Register",type=["xlsx"])
+stock_file=col2.file_uploader("Stock Report",type=["xlsx"])
 
-end_card()
+st.markdown('</div>', unsafe_allow_html=True)
 
 if not sales_file or not stock_file:
     st.stop()
 
 # =====================================================
-# LOAD SALES
+# LOAD DATA
 # =====================================================
 
 @st.cache_data
+_attachment
 def load_sales(file):
 
-    df = pd.read_excel(file, sheet_name="data")
+    df=pd.read_excel(file,sheet_name="data")
 
-    df.columns = df.columns.str.strip()
+    df.columns=df.columns.str.strip()
 
-    df["Invoice Date"] = pd.to_datetime(df["Invoice Date"])
+    df["ITEM CODE"]=df["Item Code"].astype(str).str.upper()
+    df["PRODUCT"]=df["Product"].fillna("").astype(str).str.upper()
+    df["CUSTOMER"]=df["Customer Name"].fillna("").astype(str).str.upper()
+    df["RATE"]=df["Rate"].astype(float)
 
-    df["ITEM CODE"] = df["Item Code"].astype(str).str.upper()
-    df["PRODUCT"] = df["Product"].fillna("").astype(str).str.upper()
-    df["OEM"] = df["Oem"].fillna("").astype(str).str.upper()
-    df["CUSTOMER"] = df["Customer Name"].fillna("").astype(str).str.upper()
+    df["SEARCH"]=df["ITEM CODE"]+" "+df["PRODUCT"]
 
-    df["RATE"] = df["Rate"].astype(float)
+    df=df.sort_values("Invoice Date",ascending=False)
 
-    df["SEARCH"] = df["ITEM CODE"] + " " + df["PRODUCT"] + " " + df["OEM"]
+    unique=df.drop_duplicates("ITEM CODE")
 
-    df = df.sort_values("Invoice Date", ascending=False)
+    customers=sorted(df["CUSTOMER"].unique())
 
-    unique_products = df.drop_duplicates("ITEM CODE")
+    return df,unique,customers
 
-    customers = sorted(df["CUSTOMER"].unique())
-
-    return df, unique_products, customers
-
-sales_df, unique_products, customer_list = load_sales(sales_file)
-
-# =====================================================
-# LOAD STOCK (FIXED)
-# =====================================================
+sales_df,unique_products,customers=load_sales(sales_file)
 
 @st.cache_data
 def load_stock(file):
 
-    df = pd.read_excel(file)
+    df=pd.read_excel(file)
 
-    df.columns = df.columns.str.strip().str.upper()
+    df.columns=df.columns.str.strip().str.upper()
 
-    df["ITEM CODE"] = df["ITEM CODE"].astype(str).str.upper()
-    df["WH CODE"] = df["WH CODE"].astype(str).str.upper()
-    df["TOTAL QTY"] = df["TOTAL QTY"].astype(float)
+    df["ITEM CODE"]=df["ITEM CODE"].astype(str).str.upper()
+    df["TOTAL QTY"]=df["TOTAL QTY"].astype(float)
+    df["WH CODE"]=df["WH CODE"].astype(str)
 
     return df
 
-stock_df = load_stock(stock_file)
+stock_df=load_stock(stock_file)
 
-stock_lookup = stock_df.groupby("ITEM CODE")["TOTAL QTY"].sum().to_dict()
-wh_lookup = stock_df.groupby("ITEM CODE")["WH CODE"].apply(list).to_dict()
-
-# =====================================================
-# CUSTOMER CARD
-# =====================================================
-
-card("Customer & Settings")
-
-col1, col2, col3 = st.columns(3)
-
-selected_customer = col1.selectbox("Customer", [""] + customer_list)
-
-discount_option = col2.selectbox("Discount", ["3%","2.5%","0%"])
-
-gst_option = col3.selectbox("GST", ["0%","5%","12%","18%","28%"], index=3)
-
-end_card()
-
-discount_rate = float(discount_option.replace("%",""))/100
-gst_rate = float(gst_option.replace("%",""))/100
+stock_lookup=stock_df.groupby("ITEM CODE")["TOTAL QTY"].sum().to_dict()
+wh_lookup=stock_df.groupby("ITEM CODE")["WH CODE"].apply(list).to_dict()
 
 # =====================================================
-# ORDER CARD
+# CUSTOMER SETTINGS
 # =====================================================
 
-card("Enter Order")
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">Customer & Settings</div>', unsafe_allow_html=True)
 
-order_text = st.text_area("", height=150)
+col1,col2,col3=st.columns(3)
 
-generate_clicked = st.button("Generate Purchase Order")
+selected_customer=col1.selectbox("Customer",[""]+customers)
+discount_option=col2.selectbox("Discount",["3%","2.5%","0%"])
+gst_option=col3.selectbox("GST",["0%","5%","12%","18%","28%"],index=3)
 
-end_card()
+st.markdown('</div>', unsafe_allow_html=True)
+
+discount_rate=float(discount_option.replace("%",""))/100
+gst_rate=float(gst_option.replace("%",""))/100
+
+# =====================================================
+# ORDER INPUT
+# =====================================================
+
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">Enter Order</div>', unsafe_allow_html=True)
+
+order_text=st.text_area("",height=150)
+
+generate=st.button("Generate Purchase Order")
+
+st.markdown('</div>', unsafe_allow_html=True)
 
 # =====================================================
 # HELPERS
 # =====================================================
 
 def detect_numbers(line):
-    return re.findall(r'\d+\.?\d*', line)
+    return re.findall(r'\d+\.?\d*',line)
 
 def find_candidates(query):
 
-    query = query.upper()
+    query=query.upper()
+    results=[]
 
-    results = []
+    for _,row in unique_products.iterrows():
 
-    for _, row in unique_products.iterrows():
+        score=fuzz.partial_ratio(query,row["SEARCH"])
 
-        score = fuzz.partial_ratio(query, row["SEARCH"])
-
-        if score > 60:
+        if score>60:
 
             results.append({
-                "ITEM CODE": row["ITEM CODE"],
-                "PRODUCT": row["PRODUCT"]
+                "ITEM CODE":row["ITEM CODE"],
+                "PRODUCT":row["PRODUCT"]
             })
 
     return results[:20]
 
-def get_price(code, override):
+def get_price(code,override):
 
     if override:
         return override
 
     if selected_customer:
 
-        cust = sales_df[
-            (sales_df["ITEM CODE"] == code) &
-            (sales_df["CUSTOMER"] == selected_customer)
+        rows=sales_df[
+            (sales_df["ITEM CODE"]==code)&
+            (sales_df["CUSTOMER"]==selected_customer)
         ]
 
-        if not cust.empty:
-            return cust.iloc[0]["RATE"]
+        if not rows.empty:
+            return rows.iloc[0]["RATE"]
 
-    rows = sales_df[sales_df["ITEM CODE"] == code]
+    rows=sales_df[sales_df["ITEM CODE"]==code]
 
     if not rows.empty:
         return rows.iloc[0]["RATE"]
@@ -238,55 +228,55 @@ def get_price(code, override):
 # GENERATE ITEMS
 # =====================================================
 
-if generate_clicked:
+if generate:
 
-    st.session_state.po_items = []
+    st.session_state.po_items=[]
 
-    lines = [l for l in order_text.split("\n") if l.strip()]
+    lines=[l for l in order_text.split("\n") if l.strip()]
 
     for line in lines:
 
-        nums = detect_numbers(line)
+        nums=detect_numbers(line)
 
-        qty = int(float(nums[0])) if nums else 1
+        qty=int(float(nums[0])) if nums else 1
+        price_override=float(nums[-1]) if len(nums)>=2 else None
 
-        price_override = float(nums[-1]) if len(nums)>=2 else None
-
-        product = line
+        product=line
 
         for n in nums:
-            product = product.replace(n,"")
+            product=product.replace(n,"")
 
-        candidates = find_candidates(product)
+        candidates=find_candidates(product)
 
         st.session_state.po_items.append({
-            "raw_line": line,
-            "qty": qty,
-            "price": price_override,
-            "candidates": candidates
+            "raw":line,
+            "qty":qty,
+            "price":price_override,
+            "candidates":candidates
         })
 
 # =====================================================
-# CONFIRM PRODUCTS CARD
+# CONFIRM PRODUCTS
 # =====================================================
 
 if st.session_state.po_items:
 
-    card("Confirm Products")
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Confirm Products</div>', unsafe_allow_html=True)
 
-    final_rows=[]
+    rows=[]
 
     for i,item in enumerate(st.session_state.po_items):
 
-        st.subheader(item["raw_line"])
+        st.subheader(item["raw"])
 
         options=[f"{c['ITEM CODE']} | {c['PRODUCT']}" for c in item["candidates"]]
 
-        selected=st.selectbox("Product",options,key=f"prod{i}")
+        selected=st.selectbox("Product",options,key=i)
 
-        code=selected.split("|")[0].strip()
+        code=selected.split("|")[0]
 
-        wh_list=list(set(wh_lookup.get(code,[])))
+        wh_list=wh_lookup.get(code,[])
 
         primary=[w for w in PRIMARY_WH if w in wh_list]
         secondary=[w for w in wh_list if w not in PRIMARY_WH]
@@ -295,37 +285,22 @@ if st.session_state.po_items:
 
         wh=st.selectbox("Warehouse",wh_sorted,key=f"wh{i}")
 
-        stock=stock_lookup.get(code,0)
-
-        if stock>5:
-            st.markdown(f'<span class="stock-green">Stock: {stock}</span>',unsafe_allow_html=True)
-        elif stock>0:
-            st.markdown(f'<span class="stock-orange">Stock: {stock}</span>',unsafe_allow_html=True)
-        else:
-            st.markdown(f'<span class="stock-red">Stock: {stock}</span>',unsafe_allow_html=True)
-
         price=get_price(code,item["price"])
 
-        final_rows.append({
+        rows.append({
             "ITEM CODE":code,
             "PRODUCT":selected,
             "WH CODE":wh,
-            "STOCK":stock,
+            "STOCK":stock_lookup.get(code,0),
             "QUANTITY":item["qty"],
-            "PRICE":price
+            "PRICE":price,
+            "AMOUNT":price*item["qty"]
         })
 
-    confirm_clicked=st.button("Confirm Selection")
+    if st.button("Confirm Selection"):
+        st.session_state.final_df=pd.DataFrame(rows)
 
-    end_card()
-
-    if confirm_clicked:
-
-        df=pd.DataFrame(final_rows)
-
-        df["AMOUNT"]=df["QUANTITY"]*df["PRICE"]
-
-        st.session_state.final_df=df
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # =====================================================
 # TABLE + TOTALS
@@ -333,43 +308,56 @@ if st.session_state.po_items:
 
 if st.session_state.final_df is not None:
 
-    col1,col2=st.columns([4,1])
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Purchase Order</div>', unsafe_allow_html=True)
 
-    with col1:
+    edited=st.data_editor(st.session_state.final_df,use_container_width=True)
 
-        card("Purchase Order")
+    edited["AMOUNT"]=edited["QUANTITY"]*edited["PRICE"]
 
-        edited=st.data_editor(st.session_state.final_df,use_container_width=True)
-
-        edited["AMOUNT"]=edited["QUANTITY"]*edited["PRICE"]
-
-        st.session_state.final_df=edited
-
-        end_card()
+    st.session_state.final_df=edited
 
     subtotal=edited["AMOUNT"].sum()
     discount=subtotal*discount_rate
     gst=(subtotal-discount)*gst_rate
     total=subtotal-discount+gst
 
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # totals card below right
+    col1,col2=st.columns([5,1])
+
     with col2:
 
-        card("Totals")
-
         st.markdown(f"""
-Subtotal: ₹{subtotal:,.2f}
+<div class="totals-card">
 
-Discount ({discount_option}): ₹{discount:,.2f}
+<div class="total-line">
+<span>Subtotal</span>
+<span>₹{subtotal:,.2f}</span>
+</div>
 
-GST ({gst_option}): ₹{gst:,.2f}
+<div class="total-line">
+<span>Discount ({discount_option})</span>
+<span>₹{discount:,.2f}</span>
+</div>
 
----
+<div class="total-line">
+<span>GST ({gst_option})</span>
+<span>₹{gst:,.2f}</span>
+</div>
 
-**Total: ₹{total:,.2f}**
-""")
+<hr>
 
-        end_card()
+<div class="total-line total-final">
+<span>Total</span>
+<span>₹{total:,.2f}</span>
+</div>
 
+</div>
+""",unsafe_allow_html=True)
+
+    # download button
     buffer=io.BytesIO()
 
     export=edited.copy()
@@ -383,4 +371,4 @@ GST ({gst_option}): ₹{gst:,.2f}
 
     final_export.to_excel(buffer,index=False)
 
-    st.download_button("Download Excel",buffer.getvalue(),"PO.xlsx")
+    st.download_button("Download PO Excel",buffer.getvalue(),"Purchase_Order.xlsx")
