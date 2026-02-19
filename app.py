@@ -51,8 +51,8 @@ if "po_items" not in st.session_state:
 if "final_df" not in st.session_state:
     st.session_state.final_df = None
 
-if "ambiguous_lines" not in st.session_state:
-    st.session_state.ambiguous_lines = None
+if "confirmation_data" not in st.session_state:
+    st.session_state.confirmation_data = None
 
 # =====================================================
 # DATA SOURCE
@@ -154,24 +154,13 @@ generate = st.button("Generate Purchase Order")
 
 pure_int_pattern = re.compile(r'^\d+$')
 
-unit_pattern = re.compile(r'\d+[a-zA-Z"]')
+def clean_line(line):
+    line = re.sub(r'[.@,;:/\\\-]+', ' ', line)
+    line = re.sub(r'\s+', ' ', line)
+    return line.strip()
 
-def extract_parts(line):
-
-    parts = re.findall(r'\S+', line)
-
-    pure_ints = []
-    ignored = []
-
-    for p in parts:
-
-        if pure_int_pattern.match(p):
-            pure_ints.append(p)
-
-        elif unit_pattern.search(p):
-            ignored.append(p)
-
-    return pure_ints
+def extract_integers(line):
+    return re.findall(r'\b\d+\b', line)
 
 def find_candidates(query):
 
@@ -180,11 +169,8 @@ def find_candidates(query):
     results = []
 
     for _, row in unique_products.iterrows():
-
         score = fuzz.partial_ratio(query, row["SEARCH"])
-
         if score > 60:
-
             results.append({
                 "ITEM CODE": row["ITEM CODE"],
                 "PRODUCT": row["PRODUCT"]
@@ -198,76 +184,114 @@ def get_price(code, override):
         return override
 
     if selected_customer:
-
         cust = sales_df[
             (sales_df["ITEM CODE"] == code) &
             (sales_df["CUSTOMER"] == selected_customer)
         ]
-
         if not cust.empty:
             return cust.iloc[0]["RATE"]
 
     rows = sales_df[sales_df["ITEM CODE"] == code]
-
     if not rows.empty:
         return rows.iloc[0]["RATE"]
 
     return 0
 
 # =====================================================
-# GENERATE LOGIC
+# GENERATE
 # =====================================================
 
 if generate:
 
     lines = [l.strip() for l in order_text.split("\n") if l.strip()]
 
-    po_items = []
-
-    ambiguous = []
+    confirmation_data = []
+    auto_items = []
 
     for line in lines:
 
-        ints = extract_parts(line)
+        cleaned = clean_line(line)
+        integers = extract_integers(cleaned)
 
-        if len(ints) == 0:
-
-            st.warning(f"No quantity detected: {line}")
+        # Always confirm if 2 or more integers
+        if len(integers) >= 2:
+            confirmation_data.append({
+                "original": line,
+                "cleaned": cleaned,
+                "integers": integers
+            })
             continue
 
-        if len(ints) > 2:
-
-            ambiguous.append(line)
+        if len(integers) == 1:
+            qty = int(integers[0])
+            product_text = cleaned.replace(integers[0], "")
+            auto_items.append({
+                "raw": line,
+                "qty": qty,
+                "price": None,
+                "product_text": product_text
+            })
             continue
 
-        qty = int(ints[0])
-
-        price_override = None
-
-        if len(ints) == 2:
-            price_override = float(ints[1])
-
-        product = line
-
-        for i in ints:
-            product = product.replace(i,"")
-
-        candidates = find_candidates(product)
-
-        po_items.append({
-            "raw": line,
-            "qty": qty,
-            "price": price_override,
-            "candidates": candidates
+        # No integer found
+        confirmation_data.append({
+            "original": line,
+            "cleaned": cleaned,
+            "integers": []
         })
 
-    if ambiguous:
-        st.session_state.ambiguous_lines = ambiguous
-    else:
-        st.session_state.po_items = po_items
+    st.session_state.confirmation_data = confirmation_data
+    st.session_state.po_items = auto_items
 
 # =====================================================
-# CONFIRM PRODUCTS
+# CONFIRMATION PANEL
+# =====================================================
+
+if st.session_state.confirmation_data:
+
+    st.subheader("Confirm Number Roles")
+
+    resolved_items = []
+
+    for idx, item in enumerate(st.session_state.confirmation_data):
+
+        st.markdown(f"**{item['original']}**")
+
+        qty = None
+        price = None
+
+        for num in item["integers"]:
+
+            role = st.radio(
+                f"{num}",
+                ["Quantity","Price","Ignore"],
+                key=f"{idx}_{num}"
+            )
+
+            if role == "Quantity":
+                qty = int(num)
+            elif role == "Price":
+                price = float(num)
+
+        if st.button("Apply Confirmation", key=f"confirm_{idx}"):
+
+            product_text = item["cleaned"]
+            for n in item["integers"]:
+                product_text = product_text.replace(n, "")
+
+            resolved_items.append({
+                "raw": item["original"],
+                "qty": qty if qty else 1,
+                "price": price,
+                "product_text": product_text
+            })
+
+    if resolved_items:
+        st.session_state.po_items.extend(resolved_items)
+        st.session_state.confirmation_data = None
+
+# =====================================================
+# PRODUCT CONFIRMATION
 # =====================================================
 
 if st.session_state.po_items:
@@ -278,15 +302,15 @@ if st.session_state.po_items:
 
     for i,item in enumerate(st.session_state.po_items):
 
-        st.markdown(f"**{item['raw']}**")
+        candidates = find_candidates(item["product_text"])
 
         options = [
             f"{c['ITEM CODE']} | {c['PRODUCT']}"
-            for c in item["candidates"]
+            for c in candidates
         ]
 
         if not options:
-            st.warning("No product match found")
+            st.warning(f"No product match found for: {item['raw']}")
             continue
 
         selected = st.selectbox("Product", options, key=f"prod{i}")
@@ -307,7 +331,6 @@ if st.session_state.po_items:
         wh = st.selectbox("Warehouse", wh_sorted, key=f"wh{i}")
 
         stock = stock_lookup.get(code, 0)
-
         st.write(f"Stock Available: {stock}")
 
         price = get_price(code, item["price"])
@@ -323,7 +346,6 @@ if st.session_state.po_items:
         })
 
     if st.button("Confirm Selection"):
-
         st.session_state.final_df = pd.DataFrame(rows)
 
 # =====================================================
@@ -334,19 +356,19 @@ if st.session_state.final_df is not None:
 
     st.subheader("Purchase Order")
 
+    # Refresh button ABOVE table
+    if st.button("Refresh Table"):
+        st.session_state.final_df["AMOUNT"] = (
+            st.session_state.final_df["QUANTITY"] *
+            st.session_state.final_df["PRICE"]
+        )
+        st.rerun()
+
     edited_df = st.data_editor(
         st.session_state.final_df,
         use_container_width=True,
         key="po_table"
     )
-
-    if st.button("Refresh Table"):
-
-        edited_df["AMOUNT"] = edited_df["QUANTITY"] * edited_df["PRICE"]
-
-        st.session_state.final_df = edited_df
-
-        st.rerun()
 
     edited_df["AMOUNT"] = edited_df["QUANTITY"] * edited_df["PRICE"]
 
