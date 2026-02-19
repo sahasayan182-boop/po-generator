@@ -152,8 +152,6 @@ generate = st.button("Generate Purchase Order")
 # HELPERS
 # =====================================================
 
-pure_int_pattern = re.compile(r'^\d+$')
-
 def clean_line(line):
     line = re.sub(r'[.@,;:/\\\-]+', ' ', line)
     line = re.sub(r'\s+', ' ', line)
@@ -198,7 +196,7 @@ def get_price(code, override):
     return 0
 
 # =====================================================
-# GENERATE
+# GENERATE LOGIC
 # =====================================================
 
 if generate:
@@ -213,16 +211,13 @@ if generate:
         cleaned = clean_line(line)
         integers = extract_integers(cleaned)
 
-        # Always confirm if 2 or more integers
         if len(integers) >= 2:
             confirmation_data.append({
                 "original": line,
                 "cleaned": cleaned,
                 "integers": integers
             })
-            continue
-
-        if len(integers) == 1:
+        elif len(integers) == 1:
             qty = int(integers[0])
             product_text = cleaned.replace(integers[0], "")
             auto_items.append({
@@ -231,20 +226,18 @@ if generate:
                 "price": None,
                 "product_text": product_text
             })
-            continue
-
-        # No integer found
-        confirmation_data.append({
-            "original": line,
-            "cleaned": cleaned,
-            "integers": []
-        })
+        else:
+            confirmation_data.append({
+                "original": line,
+                "cleaned": cleaned,
+                "integers": []
+            })
 
     st.session_state.confirmation_data = confirmation_data
     st.session_state.po_items = auto_items
 
 # =====================================================
-# CONFIRMATION PANEL
+# CONFIRMATION PANEL (SAFE MODE)
 # =====================================================
 
 if st.session_state.confirmation_data:
@@ -257,23 +250,29 @@ if st.session_state.confirmation_data:
 
         st.markdown(f"**{item['original']}**")
 
-        qty = None
-        price = None
-
         for num in item["integers"]:
 
-            role = st.radio(
+            st.radio(
                 f"{num}",
                 ["Quantity","Price","Ignore"],
                 key=f"{idx}_{num}"
             )
 
-            if role == "Quantity":
-                qty = int(num)
-            elif role == "Price":
-                price = float(num)
+    if st.button("Apply Confirmation To All"):
 
-        if st.button("Apply Confirmation", key=f"confirm_{idx}"):
+        for idx, item in enumerate(st.session_state.confirmation_data):
+
+            qty = None
+            price = None
+
+            for num in item["integers"]:
+
+                role = st.session_state[f"{idx}_{num}"]
+
+                if role == "Quantity":
+                    qty = int(num)
+                elif role == "Price":
+                    price = float(num)
 
             product_text = item["cleaned"]
             for n in item["integers"]:
@@ -286,7 +285,6 @@ if st.session_state.confirmation_data:
                 "product_text": product_text
             })
 
-    if resolved_items:
         st.session_state.po_items.extend(resolved_items)
         st.session_state.confirmation_data = None
 
@@ -301,6 +299,8 @@ if st.session_state.po_items:
     rows = []
 
     for i,item in enumerate(st.session_state.po_items):
+
+        st.markdown(f"**{item['raw']}**")
 
         candidates = find_candidates(item["product_text"])
 
@@ -356,7 +356,6 @@ if st.session_state.final_df is not None:
 
     st.subheader("Purchase Order")
 
-    # Refresh button ABOVE table
     if st.button("Refresh Table"):
         st.session_state.final_df["AMOUNT"] = (
             st.session_state.final_df["QUANTITY"] *
