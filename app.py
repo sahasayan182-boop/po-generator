@@ -6,6 +6,8 @@ from rapidfuzz import fuzz
 
 st.set_page_config(page_title="Purchase Order System", layout="wide")
 
+PRIMARY_WH = ["BWD_MAIN","FBD_MAIN","CHN_CENTRL","KOL_MAIN"]
+
 # =====================================================
 # CSS
 # =====================================================
@@ -39,8 +41,6 @@ st.markdown("""
 
 st.title("Purchase Order System")
 
-PRIMARY_WH = ["BWD_MAIN","FBD_MAIN","CHN_CENTRL","KOL_MAIN"]
-
 # =====================================================
 # SESSION STATE
 # =====================================================
@@ -61,7 +61,6 @@ if "confirmation_data" not in st.session_state:
 st.subheader("Data Source")
 
 col1, col2 = st.columns(2)
-
 sales_file = col1.file_uploader("Sales Register", type=["xlsx"])
 stock_file = col2.file_uploader("Stock Report", type=["xlsx"])
 
@@ -76,7 +75,6 @@ if not sales_file or not stock_file:
 def load_sales(file):
 
     df = pd.read_excel(file, sheet_name="data")
-
     df.columns = df.columns.str.strip()
 
     df["ITEM CODE"] = df["Item Code"].astype(str).str.strip().str.upper()
@@ -87,8 +85,8 @@ def load_sales(file):
 
     df["SEARCH"] = (
         df["ITEM CODE"] + " " +
-        df["PRODUCT"] + " " +
-        df["OEM"]
+        df["OEM"] + " " +
+        df["PRODUCT"]
     )
 
     df = df.sort_values("Invoice Date", ascending=False)
@@ -109,7 +107,6 @@ sales_df, unique_products, customers = load_sales(sales_file)
 def load_stock(file):
 
     df = pd.read_excel(file)
-
     df.columns = df.columns.str.strip().str.upper()
 
     df["ITEM CODE"] = df["ITEM CODE"].astype(str).str.strip().str.upper()
@@ -139,18 +136,10 @@ discount_rate = float(discount_option.replace("%","")) / 100
 gst_rate = float(gst_option.replace("%","")) / 100
 
 # =====================================================
-# ORDER INPUT
-# =====================================================
-
-st.subheader("Enter Order")
-
-order_text = st.text_area("", height=150)
-
-generate = st.button("Generate Purchase Order")
-
-# =====================================================
 # HELPERS
 # =====================================================
+
+IGNORE_WORDS = ["CARTON","PCS","NOS","PIECE","BOX","PACK"]
 
 def clean_line(line):
     line = re.sub(r'[.@,;:/\\\-]+', ' ', line)
@@ -160,21 +149,35 @@ def clean_line(line):
 def extract_integers(line):
     return re.findall(r'\b\d+\b', line)
 
-def find_candidates(query):
+def clean_product_text(text):
+    words = text.upper().split()
+    cleaned = [w for w in words if w not in IGNORE_WORDS]
+    return " ".join(cleaned)
 
-    query = query.upper().strip()
+def rank_products(query):
 
-    results = []
+    tokens = query.upper().split()
+    ranked = []
 
     for _, row in unique_products.iterrows():
-        score = fuzz.partial_ratio(query, row["SEARCH"])
-        if score > 60:
-            results.append({
-                "ITEM CODE": row["ITEM CODE"],
-                "PRODUCT": row["PRODUCT"]
-            })
+        score = 0
+        for token in tokens:
+            if token in row["ITEM CODE"]:
+                score += 100
+            if token in row["OEM"]:
+                score += 90
+            if token in row["PRODUCT"]:
+                score += 80
 
-    return results[:20]
+        fuzzy_score = fuzz.partial_ratio(query, row["SEARCH"])
+        score += fuzzy_score * 0.2
+
+        if score > 30:
+            ranked.append((score, row))
+
+    ranked.sort(reverse=True, key=lambda x: x[0])
+
+    return [r[1] for r in ranked]
 
 def get_price(code, override):
 
@@ -196,8 +199,13 @@ def get_price(code, override):
     return 0
 
 # =====================================================
-# GENERATE LOGIC
+# ORDER INPUT
 # =====================================================
+
+st.subheader("Enter Order")
+order_text = st.text_area("", height=150)
+
+generate = st.button("Generate Purchase Order")
 
 if generate:
 
@@ -220,6 +228,7 @@ if generate:
         elif len(integers) == 1:
             qty = int(integers[0])
             product_text = cleaned.replace(integers[0], "")
+            product_text = clean_product_text(product_text)
             auto_items.append({
                 "raw": line,
                 "qty": qty,
@@ -237,21 +246,16 @@ if generate:
     st.session_state.po_items = auto_items
 
 # =====================================================
-# CONFIRMATION PANEL (SAFE MODE)
+# CONFIRMATION PANEL
 # =====================================================
 
 if st.session_state.confirmation_data:
 
     st.subheader("Confirm Number Roles")
 
-    resolved_items = []
-
     for idx, item in enumerate(st.session_state.confirmation_data):
-
         st.markdown(f"**{item['original']}**")
-
         for num in item["integers"]:
-
             st.radio(
                 f"{num}",
                 ["Quantity","Price","Ignore"],
@@ -260,15 +264,15 @@ if st.session_state.confirmation_data:
 
     if st.button("Apply Confirmation To All"):
 
+        resolved = []
+
         for idx, item in enumerate(st.session_state.confirmation_data):
 
             qty = None
             price = None
 
             for num in item["integers"]:
-
                 role = st.session_state[f"{idx}_{num}"]
-
                 if role == "Quantity":
                     qty = int(num)
                 elif role == "Price":
@@ -278,14 +282,16 @@ if st.session_state.confirmation_data:
             for n in item["integers"]:
                 product_text = product_text.replace(n, "")
 
-            resolved_items.append({
+            product_text = clean_product_text(product_text)
+
+            resolved.append({
                 "raw": item["original"],
                 "qty": qty if qty else 1,
                 "price": price,
                 "product_text": product_text
             })
 
-        st.session_state.po_items.extend(resolved_items)
+        st.session_state.po_items.extend(resolved)
         st.session_state.confirmation_data = None
 
 # =====================================================
@@ -302,18 +308,29 @@ if st.session_state.po_items:
 
         st.markdown(f"**{item['raw']}**")
 
-        candidates = find_candidates(item["product_text"])
+        ranked = rank_products(item["product_text"])
 
-        options = [
-            f"{c['ITEM CODE']} | {c['PRODUCT']}"
-            for c in candidates
-        ]
+        options = []
+        for row in ranked[:20]:
+            label = f"{row['ITEM CODE']} | {row['OEM']} | {row['PRODUCT']}"
+            options.append(label)
 
-        if not options:
-            st.warning(f"No product match found for: {item['raw']}")
-            continue
+        options.append("---- All Products ----")
+
+        for _, row in unique_products.iterrows():
+            label = f"{row['ITEM CODE']} | {row['OEM']} | {row['PRODUCT']}"
+            options.append(label)
+
+        options.append("Enter Manually")
 
         selected = st.selectbox("Product", options, key=f"prod{i}")
+
+        if selected == "Enter Manually":
+            manual = st.text_input("Enter Product Manually", key=f"manual{i}")
+            continue
+
+        if selected == "---- All Products ----":
+            continue
 
         code = selected.split("|")[0].strip().upper()
 
@@ -321,7 +338,6 @@ if st.session_state.po_items:
 
         primary = [w for w in PRIMARY_WH if w in wh_list]
         secondary = [w for w in wh_list if w not in PRIMARY_WH]
-
         wh_sorted = primary + sorted(secondary)
 
         if not wh_sorted:
@@ -370,7 +386,6 @@ if st.session_state.final_df is not None:
     )
 
     edited_df["AMOUNT"] = edited_df["QUANTITY"] * edited_df["PRICE"]
-
     st.session_state.final_df = edited_df
 
     subtotal = edited_df["AMOUNT"].sum()
@@ -381,7 +396,6 @@ if st.session_state.final_df is not None:
     col_space, col_totals = st.columns([3,1])
 
     with col_totals:
-
         st.markdown(f"""
         <div class="totals-card">
         <div class="total-line"><span>Subtotal</span><span>₹{subtotal:,.2f}</span></div>
@@ -393,7 +407,6 @@ if st.session_state.final_df is not None:
         """, unsafe_allow_html=True)
 
     buffer = io.BytesIO()
-
     export_df = edited_df.copy()
 
     totals_df = pd.DataFrame({
@@ -402,7 +415,6 @@ if st.session_state.final_df is not None:
     })
 
     final_export = pd.concat([export_df, totals_df])
-
     final_export.to_excel(buffer, index=False)
 
     st.download_button(
